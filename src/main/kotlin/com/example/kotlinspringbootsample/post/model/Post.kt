@@ -1,6 +1,7 @@
 package com.example.kotlinspringbootsample.post.model
 
 import com.example.kotlinspringbootsample.common.entity.BaseEntity
+import com.example.kotlinspringbootsample.post.dto.PostRequest
 import jakarta.persistence.*
 
 @Entity
@@ -15,4 +16,11 @@ class Post(
     var content: String,
     var username: String,
     var password: String
-) : BaseEntity()
+) : BaseEntity() {
+    fun updateFromRequest(postRequest: PostRequest) {
+        this.title = postRequest.title
+        this.content = postRequest.content
+        this.username = postRequest.username
+        this.password = postRequest.password
+    }
+}
