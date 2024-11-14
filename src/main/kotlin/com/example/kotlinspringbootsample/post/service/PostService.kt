@@ -5,10 +5,11 @@ import com.example.kotlinspringbootsample.post.dto.PostResponse
 import com.example.kotlinspringbootsample.post.exception.PostNotFoundException
 import com.example.kotlinspringbootsample.post.model.Post
 import com.example.kotlinspringbootsample.post.repository.PostRepository
-import jakarta.transaction.Transactional
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 
 @Service
+@Transactional(readOnly = true)
 class PostService(
     private val postRepository: PostRepository
 ) {
