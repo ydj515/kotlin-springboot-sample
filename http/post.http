@@ -1,0 +1,35 @@
+
+### 변수 설정
+@postId = 1
+
+### post 조회
+GET {{host}}/api/posts
+
+### post id로 단건 조회
+GET {{host}}/api/posts/{{postId}}
+
+
+### post 생성
+POST {{host}}/api/posts
+Content-Type: application/json
+
+{
+  "title": "Post Title",
+  "content": "Post content goes here.",
+  "username": "user1",
+  "password": "password123"
+}
+
+### post 수정
+PUT {{host}}/api/posts/{{postId}}
+Content-Type: application/json
+
+{
+  "title": "Updated Title",
+  "content": "Updated content.",
+  "username": "user1",
+  "password": "newpassword"
+}
+
+### post 삭제
+DELETE {{host}}/api/posts/{{postId}}
