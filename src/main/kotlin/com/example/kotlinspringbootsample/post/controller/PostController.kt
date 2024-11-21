@@ -3,6 +3,7 @@ package com.example.kotlinspringbootsample.post.controller
 import com.example.kotlinspringbootsample.post.dto.PostRequest
 import com.example.kotlinspringbootsample.post.dto.PostResponse
 import com.example.kotlinspringbootsample.post.service.PostService
+import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 
@@ -26,7 +27,7 @@ class PostController(
     @PostMapping
     fun createPost(@RequestBody postRequest: PostRequest): ResponseEntity<PostResponse> {
         val post = postService.createPost(postRequest)
-        return ResponseEntity.ok(post)
+        return ResponseEntity.status(HttpStatus.CREATED).body(post)
     }
 
     @PutMapping("/{id}")
