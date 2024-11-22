@@ -12,10 +12,10 @@ class User(
     var id: Long? = null,
 
     @Column(unique = true, nullable = false)
-    var username: String? = null,
+    var username: String,
 
     @Column(nullable = false)
-    var password: String? = null,
+    var password: String,
 
     @Column
     var deletedAt: LocalDateTime? = null,
