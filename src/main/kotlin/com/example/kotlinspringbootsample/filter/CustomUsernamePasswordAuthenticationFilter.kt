@@ -1,5 +1,8 @@
 package com.example.kotlinspringbootsample.filter
 
+import com.example.kotlinspringbootsample.auth.AuthConstants.EXPIRES_KEY
+import com.example.kotlinspringbootsample.auth.AuthConstants.MAX_AGE
+import com.example.kotlinspringbootsample.auth.AuthConstants.REFRESH_TOKEN_PATH
 import com.example.kotlinspringbootsample.auth.dto.LoginRequest
 import com.example.kotlinspringbootsample.common.dto.ApiResponse
 import com.example.kotlinspringbootsample.common.dto.ResultCode
@@ -67,13 +70,13 @@ class CustomUsernamePasswordAuthenticationFilter(
         val refreshTokenCookie = Cookie("refresh_token", loginResponse.refreshToken).apply {
             isHttpOnly = true
             secure = true // https에서만 동작
-            path = "/auth/refresh" // 사용되는 경로 제한
-            maxAge = 60 * 60 * 24 * 7 // 7일
+            path = REFRESH_TOKEN_PATH
+            maxAge = MAX_AGE
         }
         response.addCookie(refreshTokenCookie)
 
-        val result = ApiResponse.success(
-            mapOf("expires_in" to loginResponse.accessTokenExpired),
+        val result = ApiResponse.of(
+            mapOf(EXPIRES_KEY to loginResponse.accessTokenExpired),
             ResultCode.SUCCESS
         )
 
