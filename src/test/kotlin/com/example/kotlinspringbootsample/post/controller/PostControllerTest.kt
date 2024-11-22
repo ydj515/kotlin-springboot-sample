@@ -1,22 +1,37 @@
 package com.example.kotlinspringbootsample.post.controller
 
+import com.example.kotlinspringbootsample.config.security.TokenProvider
 import com.example.kotlinspringbootsample.post.dto.PostRequest
 import com.example.kotlinspringbootsample.post.dto.PostResponse
 import com.example.kotlinspringbootsample.post.service.PostService
+import com.example.kotlinspringbootsample.user.service.UserService
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.ninjasquad.springmockk.MockkBean
 import io.kotest.core.spec.style.DescribeSpec
 import io.mockk.every
 import io.mockk.verify
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration
+import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
+import org.springframework.data.domain.PageImpl
+import org.springframework.data.domain.PageRequest
 import org.springframework.http.MediaType
+import org.springframework.security.authentication.AuthenticationManager
 import org.springframework.test.web.servlet.*
 
-@WebMvcTest(PostController::class)
+@WebMvcTest(
+    PostController::class,
+    excludeAutoConfiguration = [
+        UserDetailsServiceAutoConfiguration::class, SecurityAutoConfiguration::class
+    ]
+)
 class PostControllerTest(
     @Autowired private val mockMvc: MockMvc,
-    @MockkBean private val postService: PostService
+    @MockkBean private val postService: PostService,
+    @MockkBean private val userService: UserService,
+    @MockkBean private val authenticationManager: AuthenticationManager,
+    @MockkBean private val tokenProvider: TokenProvider
 ) : DescribeSpec({
 
     val mapper = jacksonObjectMapper()
@@ -30,18 +45,28 @@ class PostControllerTest(
                     PostResponse("First Post", "This is the first post", "userA"),
                     PostResponse("Second Post", "This is the second post", "userA")
                 )
-                every { postService.getAllPosts() } returns posts
+                val page = PageImpl(posts, PageRequest.of(0, 10), posts.size.toLong())
+
+                every { postService.getAllPosts(0, 10) } returns page
 
                 // when then
                 mockMvc.get("/api/posts")
                     .andExpect {
                         status { isOk() }
                         content {
-                            json(mapper.writeValueAsString(posts))
+                            json("""
+                            {
+                                "content": ${mapper.writeValueAsString(posts)},
+                                "totalPages": 1,
+                                "totalElements": 2,
+                                "size": 10,
+                                "number": 0
+                            }
+                        """)
                         }
                     }
 
-                verify { postService.getAllPosts() }
+                verify { postService.getAllPosts(0, 10) }
             }
         }
 
@@ -121,7 +146,8 @@ class PostControllerTest(
         context("유효한 요청이 전달되면") {
             it("204응답과 id의 post가 삭제된다.") {
                 // given
-                every { postService.deletePost(1L) } returns Unit
+                val postResponse = PostResponse("Deleted Post", "This is a deleted post", "username")
+                every { postService.deletePost(1L) } returns postResponse
 
                 // when then
                 mockMvc.delete("/api/posts/1")

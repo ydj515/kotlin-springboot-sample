@@ -25,11 +25,6 @@ class PostService(
         return posts.map { it.toPostResponse() }
     }
 
-    fun getAllPosts(): List<PostResponse> {
-        var posts = postRepository.findAll()
-        return posts.map { it.toPostResponse() }
-    }
-
     fun getPostById(id: Long): PostResponse {
         val post = postRepository.findById(id).orElseThrow {
             PostNotFoundException("Post not found with id $id")
