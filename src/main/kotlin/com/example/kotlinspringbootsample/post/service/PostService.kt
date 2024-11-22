@@ -6,6 +6,9 @@ import com.example.kotlinspringbootsample.post.exception.PostNotFoundException
 import com.example.kotlinspringbootsample.post.extensions.toPost
 import com.example.kotlinspringbootsample.post.extensions.toPostResponse
 import com.example.kotlinspringbootsample.post.repository.PostRepository
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -14,6 +17,13 @@ import org.springframework.transaction.annotation.Transactional
 class PostService(
     private val postRepository: PostRepository
 ) {
+
+    fun getAllPosts(page: Int, size: Int): Page<PostResponse> {
+        val pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"))
+        val posts = postRepository.findAll(pageable)
+
+        return posts.map { it.toPostResponse() }
+    }
 
     fun getAllPosts(): List<PostResponse> {
         var posts = postRepository.findAll()

@@ -3,6 +3,7 @@ package com.example.kotlinspringbootsample.post.controller
 import com.example.kotlinspringbootsample.post.dto.PostRequest
 import com.example.kotlinspringbootsample.post.dto.PostResponse
 import com.example.kotlinspringbootsample.post.service.PostService
+import org.springframework.data.domain.Page
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
@@ -14,8 +15,12 @@ class PostController(
 ) {
 
     @GetMapping
-    fun getAllPosts(): List<PostResponse> {
-        return postService.getAllPosts()
+    fun getPosts(
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "10") size: Int
+    ): ResponseEntity<Page<PostResponse>> {
+        val posts = postService.getAllPosts(page, size)
+        return ResponseEntity.ok(posts)
     }
 
     @GetMapping("/{id}")
