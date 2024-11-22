@@ -20,7 +20,7 @@ class PostService(
 
     fun getAllPosts(page: Int, size: Int): Page<PostResponse> {
         val pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"))
-        val posts = postRepository.findAll(pageable)
+        val posts = postRepository.findAllByDeletedAtIsNull(pageable)
 
         return posts.map { it.toPostResponse() }
     }
@@ -61,11 +61,13 @@ class PostService(
     }
 
     @Transactional
-    fun deletePost(id: Long) {
+    fun deletePost(id: Long): PostResponse {
         val post = postRepository.findById(id).orElseThrow {
             PostNotFoundException("Post not found with id $id")
         }
 
-        postRepository.delete(post)
+        post.delete()
+        val deletedPost = postRepository.save(post)
+        return deletedPost.toPostResponse()
     }
 }
