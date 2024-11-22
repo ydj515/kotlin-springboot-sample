@@ -21,6 +21,7 @@ class AuthService(
         return User.builder()
             .username(member.username)
             .password(member.password)
+            .roles("USER")
             .build()
     }
 
