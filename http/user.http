@@ -1,0 +1,9 @@
+
+### 로그인
+POST {{host}}/signup
+Content-Type: application/json
+
+{
+  "username": "test1",
+  "password": "qwer1234"
+}
