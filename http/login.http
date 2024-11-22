@@ -15,5 +15,5 @@ Content-Type: application/json
         client.assert(response.headers.valueOf("Authorization") && response.headers.valueOf("Authorization").startsWith("Bearer "), "Authorization header is missing or invalid");
     });
 
-    client.global.set("accessToken",response.headers.valueOf("Authorization"))
+    client.global.set("accessToken",response.headers.valueOf("Authorization").split("Bearer ")[1])
 %}

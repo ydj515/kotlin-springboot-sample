@@ -4,6 +4,7 @@
 
 ### post 조회
 GET {{host}}/api/posts
+Authorization: Bearer {{accessToken}}
 
 ### post id로 단건 조회
 GET {{host}}/api/posts/{{postId}}
@@ -12,6 +13,7 @@ GET {{host}}/api/posts/{{postId}}
 ### post 생성
 POST {{host}}/api/posts
 Content-Type: application/json
+Authorization: Bearer {{accessToken}}
 
 {
   "title": "Post Title",
@@ -23,6 +25,7 @@ Content-Type: application/json
 ### post 수정
 PUT {{host}}/api/posts/{{postId}}
 Content-Type: application/json
+Authorization: Bearer {{accessToken}}
 
 {
   "title": "Updated Title",
@@ -33,3 +36,4 @@ Content-Type: application/json
 
 ### post 삭제
 DELETE {{host}}/api/posts/{{postId}}
+Authorization: Bearer {{accessToken}}
