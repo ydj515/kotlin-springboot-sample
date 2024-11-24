@@ -33,6 +33,7 @@ class SecurityConfig(
             "/v3/api-docs/**",
             "/api-docs/**",
             "/api-docs",
+            "/h2-console/**",
             "/swagger-ui.html"
         )
 
