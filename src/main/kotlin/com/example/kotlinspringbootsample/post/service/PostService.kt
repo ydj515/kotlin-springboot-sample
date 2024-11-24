@@ -1,5 +1,7 @@
 package com.example.kotlinspringbootsample.post.service
 
+import com.example.kotlinspringbootsample.post.dto.PostDeleteRequest
+import com.example.kotlinspringbootsample.post.dto.PostDeletedResponse
 import com.example.kotlinspringbootsample.post.dto.PostRequest
 import com.example.kotlinspringbootsample.post.dto.PostResponse
 import com.example.kotlinspringbootsample.post.exception.PostNotFoundException
@@ -48,6 +50,10 @@ class PostService(
             PostNotFoundException("Post not found with id $id")
         }
 
+        if (post.username != postRequest.username || post.password != postRequest.password) {
+            throw PostNotFoundException("username or password invalid")
+        }
+
         post.updateFromRequest(postRequest)
 
         val savedPost = postRepository.save(post)
@@ -56,13 +62,17 @@ class PostService(
     }
 
     @Transactional
-    fun deletePost(id: Long): PostResponse {
+    fun deletePost(id: Long, postRequest: PostDeleteRequest): PostDeletedResponse {
         val post = postRepository.findById(id).orElseThrow {
             PostNotFoundException("Post not found with id $id")
         }
 
+        if (post.username != postRequest.username || post.password != postRequest.password) {
+            throw PostNotFoundException("username or password invalid")
+        }
+
         post.delete()
-        val deletedPost = postRepository.save(post)
-        return deletedPost.toPostResponse()
+        postRepository.save(post)
+        return PostDeletedResponse("Post deleted successfully")
     }
 }

@@ -1,5 +1,7 @@
 package com.example.kotlinspringbootsample.post.controller
 
+import com.example.kotlinspringbootsample.post.dto.PostDeleteRequest
+import com.example.kotlinspringbootsample.post.dto.PostDeletedResponse
 import com.example.kotlinspringbootsample.post.dto.PostRequest
 import com.example.kotlinspringbootsample.post.dto.PostResponse
 import com.example.kotlinspringbootsample.post.service.PostService
@@ -45,8 +47,11 @@ class PostController(
     }
 
     @DeleteMapping("/{id}")
-    fun deletePost(@PathVariable id: Long): ResponseEntity<Void> {
-        postService.deletePost(id)
-        return ResponseEntity.noContent().build()
+    fun deletePost(
+        @PathVariable id: Long,
+        @RequestBody postRequest: PostDeleteRequest
+    ): ResponseEntity<PostDeletedResponse> {
+        val postDeletedResponse = postService.deletePost(id, postRequest)
+        return ResponseEntity.ok(postDeletedResponse)
     }
 }

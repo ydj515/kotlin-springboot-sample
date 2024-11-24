@@ -31,9 +31,15 @@ Authorization: Bearer {{accessToken}}
   "title": "Updated Title",
   "content": "Updated content.",
   "username": "user1",
-  "password": "newpassword"
+  "password": "password123"
 }
 
 ### post 삭제
 DELETE {{host}}/api/posts/{{postId}}
+Content-Type: application/json
 Authorization: Bearer {{accessToken}}
+
+{
+  "username": "user1",
+  "password": "password123"
+}

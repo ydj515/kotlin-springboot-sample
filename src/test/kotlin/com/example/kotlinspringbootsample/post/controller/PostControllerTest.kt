@@ -1,6 +1,8 @@
 package com.example.kotlinspringbootsample.post.controller
 
 import com.example.kotlinspringbootsample.config.security.TokenProvider
+import com.example.kotlinspringbootsample.post.dto.PostDeleteRequest
+import com.example.kotlinspringbootsample.post.dto.PostDeletedResponse
 import com.example.kotlinspringbootsample.post.dto.PostRequest
 import com.example.kotlinspringbootsample.post.dto.PostResponse
 import com.example.kotlinspringbootsample.post.service.PostService
@@ -54,7 +56,8 @@ class PostControllerTest(
                     .andExpect {
                         status { isOk() }
                         content {
-                            json("""
+                            json(
+                                """
                             {
                                 "content": ${mapper.writeValueAsString(posts)},
                                 "totalPages": 1,
@@ -62,7 +65,8 @@ class PostControllerTest(
                                 "size": 10,
                                 "number": 0
                             }
-                        """)
+                        """
+                            )
                         }
                     }
 
@@ -146,16 +150,22 @@ class PostControllerTest(
         context("유효한 요청이 전달되면") {
             it("204응답과 id의 post가 삭제된다.") {
                 // given
-                val postResponse = PostResponse("Deleted Post", "This is a deleted post", "username")
-                every { postService.deletePost(1L) } returns postResponse
+                val postRequest = PostDeleteRequest("userA", "password")
+                val postResponse = PostDeletedResponse("Post deleted successfully")
+                every { postService.deletePost(1L, postRequest) } returns postResponse
 
                 // when then
-                mockMvc.delete("/api/posts/1")
-                    .andExpect {
-                        status { isNoContent() }
+                mockMvc.delete("/api/posts/1") {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = mapper.writeValueAsString(postRequest)
+                }.andExpect {
+                    status { isOk() }
+                    content {
+                        json(mapper.writeValueAsString(postResponse))
                     }
+                }
 
-                verify { postService.deletePost(1L) }
+                verify { postService.deletePost(1L, postRequest) }
             }
         }
     }
