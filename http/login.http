@@ -1,0 +1,19 @@
+
+### 로그인
+POST {{host}}/login
+Content-Type: application/json
+
+{
+  "username": "test",
+  "password": "test"
+}
+> {%
+    client.test("Validate", function() {
+        client.assert(response.status === 200, "Response status is not 200");
+        client.assert(response.contentType.mimeType === "application/json", "Expected 'application/json'");
+        client.assert(response.body.data.expires_in && typeof response.body.data.expires_in === "number", "expires_in is missing or not a valid number");
+        client.assert(response.headers.valueOf("Authorization") && response.headers.valueOf("Authorization").startsWith("Bearer "), "Authorization header is missing or invalid");
+    });
+
+    client.global.set("accessToken",response.headers.valueOf("Authorization").split("Bearer ")[1])
+%}

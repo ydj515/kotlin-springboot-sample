@@ -1,8 +1,12 @@
 package com.example.kotlinspringbootsample.post.controller
 
+import com.example.kotlinspringbootsample.post.dto.PostDeleteRequest
+import com.example.kotlinspringbootsample.post.dto.PostDeletedResponse
 import com.example.kotlinspringbootsample.post.dto.PostRequest
 import com.example.kotlinspringbootsample.post.dto.PostResponse
 import com.example.kotlinspringbootsample.post.service.PostService
+import org.springframework.data.domain.Page
+import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 
@@ -13,8 +17,12 @@ class PostController(
 ) {
 
     @GetMapping
-    fun getAllPosts(): List<PostResponse> {
-        return postService.getAllPosts()
+    fun getPosts(
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "10") size: Int
+    ): ResponseEntity<Page<PostResponse>> {
+        val posts = postService.getAllPosts(page, size)
+        return ResponseEntity.ok(posts)
     }
 
     @GetMapping("/{id}")
@@ -26,7 +34,7 @@ class PostController(
     @PostMapping
     fun createPost(@RequestBody postRequest: PostRequest): ResponseEntity<PostResponse> {
         val post = postService.createPost(postRequest)
-        return ResponseEntity.ok(post)
+        return ResponseEntity.status(HttpStatus.CREATED).body(post)
     }
 
     @PutMapping("/{id}")
@@ -39,8 +47,11 @@ class PostController(
     }
 
     @DeleteMapping("/{id}")
-    fun deletePost(@PathVariable id: Long): ResponseEntity<Void> {
-        postService.deletePost(id)
-        return ResponseEntity.noContent().build()
+    fun deletePost(
+        @PathVariable id: Long,
+        @RequestBody postRequest: PostDeleteRequest
+    ): ResponseEntity<PostDeletedResponse> {
+        val postDeletedResponse = postService.deletePost(id, postRequest)
+        return ResponseEntity.ok(postDeletedResponse)
     }
 }

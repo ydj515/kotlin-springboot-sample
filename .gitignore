@@ -1,4 +1,5 @@
 application.yml
+jwt.yml
 
 HELP.md
 .gradle
