@@ -16,6 +16,7 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: ci-artifacts
+          path: ./artifacts
 
       - name: Check Trigger File
         run: |
