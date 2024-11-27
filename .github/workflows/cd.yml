@@ -1,0 +1,25 @@
+name: CD Pipeline
+
+on:
+  workflow_run:
+    workflows:
+      - CI Pipeline  # 첫 번째 워크플로우 이름
+    types:
+      - completed  # 첫 번째 워크플로우가 완료되었을 때 실행
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Artifact from CI
+        uses: actions/download-artifact@v3
+        with:
+          name: ci-artifacts
+
+      - name: Check Trigger File
+        run: |
+          if [ ! -f trigger_cd.txt ]; then
+            echo "Trigger file not found, skipping deployment."
+            exit 1
+          fi

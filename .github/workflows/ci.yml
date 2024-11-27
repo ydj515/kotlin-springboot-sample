@@ -39,3 +39,14 @@ jobs:
 
       - name: Run tests
         run: ./gradlew test
+
+      # 성공 시 워크플로우 트리거 파일 생성
+      - name: Trigger CD Workflow
+        run: echo "trigger_cd=true" > trigger_cd.txt
+
+      # Artifacts로 저장
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ci-artifacts
+          path: trigger_cd.txt
