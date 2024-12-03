@@ -17,8 +17,8 @@ RUN chmod +x ./gradlew
 RUN ./gradlew bootJar --no-daemon
 
 # 빌드
-RUN chmod +x ./gradlew
-RUN ./gradlew build
+#RUN chmod +x ./gradlew
+#RUN ./gradlew build
 
 # 실행할 기본 이미지 설정
 FROM openjdk:17-jdk-slim
