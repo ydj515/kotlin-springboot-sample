@@ -44,12 +44,13 @@ jobs:
       # 테스트
       - name: Run tests
         run: ./gradlew test
+
       # 아티팩트 업로드
-#      - name: Upload build artifacts
-#        uses: actions/upload-artifact@v3
-#        with:
-#          name: ci-artifacts
-#          path: build/libs/*.jar
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: ci-artifacts
+          path: build/libs/*.jar
 
   dockerize:
     runs-on: ubuntu-latest
@@ -59,10 +60,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
 
-#      - name: Download build artifacts
-#        uses: actions/download-artifact@v3
-#        with:
-#          name: ci-artifacts
+      # 아티팩트 다운로드
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: ci-artifacts
 
       # Docker 설치
       - name: Set up Docker Buildx
