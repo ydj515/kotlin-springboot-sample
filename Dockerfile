@@ -11,4 +11,4 @@ COPY build/*.jar app.jar
 EXPOSE 8080
 
 # 5. 애플리케이션 실행 명령어
-CMD ["java", "-jar", "kotlin-springboot-sample.jar"]
+CMD ["java", "-jar", "app.jar"]
