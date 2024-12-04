@@ -5,7 +5,7 @@ FROM openjdk:17-jdk-slim
 WORKDIR /app
 
 # CI에서 다운로드한 JAR 파일을 Docker 컨텍스트에서 이미지로 복사
-COPY ci-artifacts/*.jar app.jar
+COPY build/*.jar app.jar
 
 # 포트 노출
 EXPOSE 8080

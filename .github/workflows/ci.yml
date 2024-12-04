@@ -66,6 +66,10 @@ jobs:
         with:
           name: ci-artifacts
 
+      # 파일 이동
+      - name: Move artifact to build directory
+        run: mkdir -p build && mv ci-artifacts/*.jar build/
+
       # Docker 설치
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
