@@ -113,3 +113,6 @@ jobs:
 
             # Docker 컨테이너 실행
             docker run -d --name my-app -p 80:8080 ${{ secrets.DOCKER_USERNAME }}/${{ secrets.APP_NAME }}:latest
+            
+            # 오래된 이미지 정리 (최신 3개 제외)
+            docker images --format "{{.Repository}}:{{.Tag}}" | grep "${{ secrets.APP_NAME }}" | tail -n +4 | xargs -r docker rmi
