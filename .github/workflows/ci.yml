@@ -116,3 +116,5 @@ jobs:
             
             # 중지된 지 30시간 이상 지난 이미지만 삭제
             docker container prune --filter until=30h
+
+            
