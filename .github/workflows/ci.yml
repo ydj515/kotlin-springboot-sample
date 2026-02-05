@@ -47,7 +47,7 @@ jobs:
 
       # 아티팩트 업로드
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ci-artifacts
           path: build/libs/*.jar
@@ -62,7 +62,7 @@ jobs:
 
       # 아티팩트 다운로드
       - name: Download build artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: ci-artifacts
           path: ci-artifacts # 해당 디렉토리로 다운로드
