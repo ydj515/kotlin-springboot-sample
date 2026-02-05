@@ -35,7 +35,9 @@ jobs:
       - name: Set up Gradle
         uses: gradle/wrapper-validation-action@v1
         with:
-          gradle-version: '8.10'
+          min-wrapper-count: 1
+          allow-snapshots: false
+          allow-checksums: false
 
       # 빌드
       - name: Build with Gradle
