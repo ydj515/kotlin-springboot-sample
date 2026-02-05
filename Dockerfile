@@ -1,5 +1,5 @@
-# 실행할 기본 이미지 설정
-FROM openjdk:17-jdk-slim
+# 실행할 기본 이미지 설정 (OpenJDK 공식 이미지 대체)
+FROM eclipse-temurin:17-jre-jammy
 
 # 작업 디렉토리 설정
 WORKDIR /app

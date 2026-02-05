@@ -20,8 +20,8 @@ RUN ./gradlew bootJar --no-daemon
 #RUN chmod +x ./gradlew
 #RUN ./gradlew build
 
-# 실행할 기본 이미지 설정
-FROM openjdk:17-jdk-slim
+# 실행할 기본 이미지 설정 (OpenJDK 공식 이미지 대체)
+FROM eclipse-temurin:17-jre-jammy
 
 # 애플리케이션 JAR 파일을 복사
 COPY --from=builder /app/build/libs/*.jar /app/kotlin-springboot-sample.jar
