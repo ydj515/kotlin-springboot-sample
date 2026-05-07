@@ -7,10 +7,12 @@ import com.example.kotlinspringbootsample.post.dto.PostResponse
 import com.example.kotlinspringbootsample.post.exception.PostNotFoundException
 import com.example.kotlinspringbootsample.post.extensions.toPost
 import com.example.kotlinspringbootsample.post.extensions.toPostResponse
+import com.example.kotlinspringbootsample.post.model.Post
 import com.example.kotlinspringbootsample.post.repository.PostRepository
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
+import org.springframework.data.repository.findByIdOrNull
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -20,59 +22,36 @@ class PostService(
     private val postRepository: PostRepository
 ) {
 
-    fun getAllPosts(page: Int, size: Int): Page<PostResponse> {
-        val pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"))
-        val posts = postRepository.findAllByDeletedAtIsNull(pageable)
+    fun getAllPosts(page: Int, size: Int): Page<PostResponse> =
+        postRepository.findAllByDeletedAtIsNull(
+            PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"))
+        ).map { it.toPostResponse() }
 
-        return posts.map { it.toPostResponse() }
-    }
-
-    fun getPostById(id: Long): PostResponse {
-        val post = postRepository.findById(id).orElseThrow {
-            PostNotFoundException("Post not found with id $id")
-        }
-
-        return post.toPostResponse()
-    }
+    fun getPostById(id: Long): PostResponse = findPostOrThrow(id).toPostResponse()
 
     @Transactional
-    fun createPost(postRequest: PostRequest): PostResponse {
-        val post = postRequest.toPost()
-
-        val savedPost = postRepository.save(post)
-
-        return savedPost.toPostResponse()
-    }
+    fun createPost(postRequest: PostRequest): PostResponse =
+        postRepository.save(postRequest.toPost()).toPostResponse()
 
     @Transactional
-    fun updatePost(id: Long, postRequest: PostRequest): PostResponse {
-        val post = postRepository.findById(id).orElseThrow {
-            PostNotFoundException("Post not found with id $id")
-        }
-
-        if (post.username != postRequest.username || post.password != postRequest.password) {
-            throw PostNotFoundException("username or password invalid")
-        }
-
-        post.updateFromRequest(postRequest)
-
-        val savedPost = postRepository.save(post)
-
-        return savedPost.toPostResponse()
-    }
+    fun updatePost(id: Long, postRequest: PostRequest): PostResponse =
+        findPostOrThrow(id)
+            .apply {
+                requireAuthor(postRequest.username, postRequest.password)
+                updateFromRequest(postRequest)
+            }
+            .toPostResponse()
 
     @Transactional
     fun deletePost(id: Long, postRequest: PostDeleteRequest): PostDeletedResponse {
-        val post = postRepository.findById(id).orElseThrow {
-            PostNotFoundException("Post not found with id $id")
+        findPostOrThrow(id).apply {
+            requireAuthor(postRequest.username, postRequest.password)
+            markDeleted()
         }
 
-        if (post.username != postRequest.username || post.password != postRequest.password) {
-            throw PostNotFoundException("username or password invalid")
-        }
-
-        post.delete()
-        postRepository.save(post)
         return PostDeletedResponse("Post deleted successfully")
     }
+
+    private fun findPostOrThrow(id: Long): Post =
+        postRepository.findByIdOrNull(id) ?: throw PostNotFoundException("Post not found with id $id")
 }

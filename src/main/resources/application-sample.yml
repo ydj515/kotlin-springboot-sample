@@ -18,6 +18,10 @@ spring:
       hibernate:
         format_sql: true
 
+jwt:
+  secret-key: hihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihello
+  access-token-expiration: 18000000
+
 springdoc:
   swagger-ui:
     path: /

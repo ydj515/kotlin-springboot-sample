@@ -10,21 +10,19 @@ import org.springframework.context.annotation.Configuration
 class SwaggerConfig {
 
     @Bean
-    fun customOpenAPI(): OpenAPI {
-        return OpenAPI()
+    fun customOpenAPI(): OpenAPI =
+        OpenAPI()
             .info(
                 Info()
                     .title("API Documentation")
                     .version("1.0.0")
                     .description("kotlin springboot sample project입니다.")
             )
-    }
 
     @Bean
-    fun publicApi(): GroupedOpenApi {
-        return GroupedOpenApi.builder()
+    fun publicApi(): GroupedOpenApi =
+        GroupedOpenApi.builder()
             .group("public")
             .pathsToMatch("/api/**", "/signup")
             .build()
-    }
 }

@@ -18,6 +18,5 @@ class User(
     var password: String,
 
     @Column
-    var deletedAt: LocalDateTime? = null,
-
-    ) : BaseEntity()
+    var deletedAt: LocalDateTime? = null
+) : BaseEntity()

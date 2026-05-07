@@ -19,14 +19,11 @@ class UserService(
             throw UserAlreadyException()
         }
 
-        val encodedPassword = passwordEncoder.encode(signUpRequest.password)
-        val user = User(
+        return User(
             username = signUpRequest.username,
-            password = encodedPassword
+            password = passwordEncoder.encode(signUpRequest.password)
         )
-
-        val savedUser = userRepository.save(user)
-        return savedUser.toSignupResponse()
+            .let(userRepository::save)
+            .toSignupResponse()
     }
-
 }

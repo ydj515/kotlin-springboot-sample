@@ -3,20 +3,21 @@ package com.example.kotlinspringbootsample
 import com.example.kotlinspringbootsample.user.model.User
 import com.example.kotlinspringbootsample.user.repository.UserRepository
 import org.springframework.boot.CommandLineRunner
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
+import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Component
 
 @Component
-class InitializeDataLoader(private val userRepository: UserRepository) : CommandLineRunner {
-
-    private val passwordEncoder = BCryptPasswordEncoder()
+class InitializeDataLoader(
+    private val userRepository: UserRepository,
+    private val passwordEncoder: PasswordEncoder
+) : CommandLineRunner {
 
     override fun run(vararg args: String?) {
-        val user = User(
-            username = "test",
-            password = passwordEncoder.encode("test")
+        userRepository.save(
+            User(
+                username = "test",
+                password = passwordEncoder.encode("test")
+            )
         )
-
-        userRepository.save(user)
     }
 }

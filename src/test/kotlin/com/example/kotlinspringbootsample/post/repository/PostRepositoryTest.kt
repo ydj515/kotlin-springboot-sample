@@ -3,7 +3,6 @@ package com.example.kotlinspringbootsample.post.repository
 import com.example.kotlinspringbootsample.config.ClockConfig
 import com.example.kotlinspringbootsample.post.model.Post
 import io.kotest.core.spec.style.DescribeSpec
-import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest
@@ -25,12 +24,12 @@ class PostRepositoryTest(
     val fixedInstant = Instant.parse("2023-12-06T12:00:00Z")
     val fixedClock = Clock.fixed(fixedInstant, ZoneId.of(ZoneOffset.UTC.id))
 
-    beforeTest {
+    beforeEach {
         val fixedNow = LocalDateTime.now(fixedClock)
 
-        post1 = Post(id = 1L, title = "Post 1", content = "Content 1", username = "user1", password = "pass1")
-        post2 = Post(id = 2L, title = "Post 2", content = "Content 2", username = "user2", password = "pass2", )
-        deletedPost = Post(id = 3L, title = "Post 3", content = "Content 3", username = "user3", password = "pass3", deletedAt = fixedNow)
+        post1 = Post(title = "Post 1", content = "Content 1", username = "user1", password = "pass1")
+        post2 = Post(title = "Post 2", content = "Content 2", username = "user2", password = "pass2")
+        deletedPost = Post(title = "Post 3", content = "Content 3", username = "user3", password = "pass3", deletedAt = fixedNow)
 
         postRepository.saveAll(listOf(post1, post2, deletedPost))
     }
@@ -64,7 +63,7 @@ class PostRepositoryTest(
         }
     }
 
-    afterTest {
+    afterEach {
         postRepository.deleteAll()
     }
 })

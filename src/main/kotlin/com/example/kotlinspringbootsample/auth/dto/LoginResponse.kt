@@ -4,7 +4,7 @@ data class LoginResponse(
     val userId: String,
     val type: String,
     val accessToken: String,
-    val refreshToken: String?, // TODO
+    val refreshToken: String? = null,
     val accessTokenExpired: Long,
-    val refreshTokenExpired: Long?, // TODO
+    val refreshTokenExpired: Long? = null,
 )

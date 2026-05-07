@@ -1,5 +1,7 @@
 package com.example.kotlinspringbootsample.post.controller
 
+import com.example.kotlinspringbootsample.common.dto.ApiResult
+import com.example.kotlinspringbootsample.common.dto.ResultCode
 import com.example.kotlinspringbootsample.post.dto.PostDeleteRequest
 import com.example.kotlinspringbootsample.post.dto.PostDeletedResponse
 import com.example.kotlinspringbootsample.post.dto.PostRequest
@@ -7,7 +9,6 @@ import com.example.kotlinspringbootsample.post.dto.PostResponse
 import com.example.kotlinspringbootsample.post.service.PostService
 import org.springframework.data.domain.Page
 import org.springframework.http.HttpStatus
-import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 
 @RestController
@@ -20,38 +21,29 @@ class PostController(
     fun getPosts(
         @RequestParam(defaultValue = "0") page: Int,
         @RequestParam(defaultValue = "10") size: Int
-    ): ResponseEntity<Page<PostResponse>> {
-        val posts = postService.getAllPosts(page, size)
-        return ResponseEntity.ok(posts)
-    }
+    ): ApiResult.Success<Page<PostResponse>> =
+        ApiResult.success(postService.getAllPosts(page, size))
 
     @GetMapping("/{id}")
-    fun getPostById(@PathVariable id: Long): ResponseEntity<PostResponse> {
-        val post = postService.getPostById(id)
-        return ResponseEntity.ok(post)
-    }
+    fun getPostById(@PathVariable id: Long): ApiResult.Success<PostResponse> =
+        ApiResult.success(postService.getPostById(id))
 
+    @ResponseStatus(HttpStatus.CREATED)
     @PostMapping
-    fun createPost(@RequestBody postRequest: PostRequest): ResponseEntity<PostResponse> {
-        val post = postService.createPost(postRequest)
-        return ResponseEntity.status(HttpStatus.CREATED).body(post)
-    }
+    fun createPost(@RequestBody postRequest: PostRequest): ApiResult.Success<PostResponse> =
+        ApiResult.success(postService.createPost(postRequest), ResultCode.CREATED)
 
     @PutMapping("/{id}")
     fun updatePost(
         @PathVariable id: Long,
         @RequestBody postRequest: PostRequest
-    ): ResponseEntity<PostResponse> {
-        val updatedPost = postService.updatePost(id, postRequest)
-        return ResponseEntity.ok(updatedPost)
-    }
+    ): ApiResult.Success<PostResponse> =
+        ApiResult.success(postService.updatePost(id, postRequest))
 
     @DeleteMapping("/{id}")
     fun deletePost(
         @PathVariable id: Long,
         @RequestBody postRequest: PostDeleteRequest
-    ): ResponseEntity<PostDeletedResponse> {
-        val postDeletedResponse = postService.deletePost(id, postRequest)
-        return ResponseEntity.ok(postDeletedResponse)
-    }
+    ): ApiResult.Success<PostDeletedResponse> =
+        ApiResult.success(postService.deletePost(id, postRequest))
 }

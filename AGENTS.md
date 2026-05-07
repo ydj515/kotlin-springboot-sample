@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-This is a Kotlin Spring Boot API project with a single Gradle module. Application code lives under `src/main/kotlin/com/example/kotlinspringbootsample`, organized by feature (`auth`, `post`, `user`) and shared infrastructure (`config`, `common`, `filter`). Runtime configuration samples live in `src/main/resources` as `application-sample.yml` and `jwt-sample.yml`. Tests live under `src/test/kotlin` with matching package structure, and test-only secrets go in `src/test/resources`.
+This is a Kotlin Spring Boot API project with a single Gradle module. Application code lives under `src/main/kotlin/com/example/kotlinspringbootsample`, organized by feature (`auth`, `post`, `user`) and shared infrastructure (`config`, `common`, `filter`). Runtime configuration examples live in `src/main/resources/application-sample.yml`, and test-only config lives in `src/test/resources`. Tests live under `src/test/kotlin` with matching package structure.
 
 ## Build, Test, and Development Commands
 - `mise install`: install the pinned toolchain from `mise.toml` (`java 21.0.2`, `gradle 8.14.4`).

@@ -4,11 +4,11 @@ import com.example.kotlinspringbootsample.auth.AuthConstants.EXPIRES_KEY
 import com.example.kotlinspringbootsample.auth.AuthConstants.MAX_AGE
 import com.example.kotlinspringbootsample.auth.AuthConstants.REFRESH_TOKEN_PATH
 import com.example.kotlinspringbootsample.auth.dto.LoginRequest
-import com.example.kotlinspringbootsample.common.dto.ApiResponse
+import com.example.kotlinspringbootsample.common.dto.ApiResult
 import com.example.kotlinspringbootsample.common.dto.ResultCode
 import com.example.kotlinspringbootsample.config.security.TokenProvider
-import com.example.kotlinspringbootsample.user.service.UserService
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.kotlin.readValue
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.Cookie
 import jakarta.servlet.http.HttpServletRequest
@@ -21,11 +21,8 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication
 import org.springframework.security.core.AuthenticationException
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
-import org.springframework.stereotype.Component
 
-@Component // ObjectMapper를 사용하기 위해 Component 등록
 class CustomUsernamePasswordAuthenticationFilter(
-    private val userService: UserService,
     authenticationManager: AuthenticationManager,
     private val tokenProvider: TokenProvider,
     private val objectMapper: ObjectMapper
@@ -35,23 +32,14 @@ class CustomUsernamePasswordAuthenticationFilter(
         this.authenticationManager = authenticationManager
     }
 
-    @Throws(AuthenticationException::class)
-    override fun attemptAuthentication(request: HttpServletRequest, response: HttpServletResponse): Authentication {
-        try {
-            val creds = objectMapper.readValue(request.inputStream, LoginRequest::class.java)
+    override fun attemptAuthentication(request: HttpServletRequest, response: HttpServletResponse): Authentication =
+        runCatching { objectMapper.readValue<LoginRequest>(request.inputStream) }
+            .map {
+                UsernamePasswordAuthenticationToken(it.username, it.password)
+            }
+            .map(authenticationManager::authenticate)
+            .getOrElse { throw AuthenticationServiceException("Failed to read request body", it) }
 
-            val authentication = UsernamePasswordAuthenticationToken(
-                creds.username,
-                creds.password
-            )
-
-            return authenticationManager.authenticate(authentication)
-        } catch (e: Exception) {
-            throw AuthenticationServiceException("Failed to read request body", e)
-        }
-    }
-
-    @Throws(Exception::class)
     override fun successfulAuthentication(
         request: HttpServletRequest,
         response: HttpServletResponse,
@@ -63,19 +51,19 @@ class CustomUsernamePasswordAuthenticationFilter(
 
         val loginResponse = tokenProvider.generateTokenDto(authResult)
 
-        // Access Token -> Header에 추가
         response.setHeader("Authorization", "Bearer ${loginResponse.accessToken}")
 
-        // Refresh Token -> Secure Cookie에 저장
-        val refreshTokenCookie = Cookie("refresh_token", loginResponse.refreshToken).apply {
-            isHttpOnly = true
-            secure = true // https에서만 동작
-            path = REFRESH_TOKEN_PATH
-            maxAge = MAX_AGE
+        loginResponse.refreshToken?.let { refreshToken ->
+            val refreshTokenCookie = Cookie("refresh_token", refreshToken).apply {
+                isHttpOnly = true
+                secure = true
+                path = REFRESH_TOKEN_PATH
+                maxAge = MAX_AGE
+            }
+            response.addCookie(refreshTokenCookie)
         }
-        response.addCookie(refreshTokenCookie)
 
-        val result = ApiResponse.of(
+        val result = ApiResult.success(
             mapOf(EXPIRES_KEY to loginResponse.accessTokenExpired),
             ResultCode.SUCCESS
         )
