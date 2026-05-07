@@ -1,0 +1,7 @@
+spring:
+  application:
+    name: kotlin-springboot-sample-test
+
+jwt:
+  secret-key: hihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihellohihello
+  access-token-expiration: 18000000
