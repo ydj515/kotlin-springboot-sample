@@ -1,10 +1,11 @@
 # kotlin-springboot-sample
 
 ## Environment
-- Java 17
-- springboot 3.3.5
+- Java 21.0.2
+- springboot 3.5.14
+- Kotlin 1.9.25
+- Gradle 8.14.4
 - jpa
-- gradle
 
 ## Docker build
 1. build

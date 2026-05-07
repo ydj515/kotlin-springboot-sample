@@ -13,7 +13,6 @@ class InitializeDataLoader(private val userRepository: UserRepository) : Command
 
     override fun run(vararg args: String?) {
         val user = User(
-            id = 1L,
             username = "test",
             password = passwordEncoder.encode("test")
         )
