@@ -1,3 +1,23 @@
 [tools]
-java = "17.0.2"
+java = "21.0.2"
+gradle = "8.14.4"
 
+[tasks.default]
+description = "Spring Boot 애플리케이션 실행"
+run = "./gradlew bootRun"
+
+[tasks.test]
+description = "전체 테스트 실행"
+run = "./gradlew test"
+
+[tasks.build]
+description = "애플리케이션 빌드"
+run = "./gradlew build"
+
+[tasks.jar]
+description = "실행 가능한 bootJar 생성"
+run = "./gradlew bootJar"
+
+[tasks.check]
+description = "테스트와 빌드 검증 실행"
+run = "./gradlew check"
