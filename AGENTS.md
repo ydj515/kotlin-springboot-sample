@@ -1,24 +1,31 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-This is a Kotlin Spring Boot API project with a single Gradle module. Application code lives under `src/main/kotlin/com/example/kotlinspringbootsample`, organized by feature (`auth`, `post`, `user`) and shared infrastructure (`config`, `common`, `filter`). Runtime configuration examples live in `src/main/resources/application-sample.yml`, and test-only config lives in `src/test/resources`. Tests live under `src/test/kotlin` with matching package structure.
+This repository is a single-module Kotlin Spring Boot API. Main code lives under `src/main/kotlin/com/example/kotlinspringbootsample` and follows layered packages:
+- `presentation`: controllers plus `request` and `response` DTOs
+- `application`: `*UseCase`, `command`, `result`, and mapping helpers
+- `domain`: entities, policies, exceptions, and repository ports
+- `infrastructure`: JWT/filter/bootstrap adapters
+- `config`, `common`: Spring configuration and shared base types
+
+Tests mirror the same structure under `src/test/kotlin`. Runtime examples live in `src/main/resources/application-sample.yml`; test profile config lives in `src/test/resources/application-test.yml`.
 
 ## Build, Test, and Development Commands
-- `mise install`: install the pinned toolchain from `mise.toml` (`java 21.0.2`, `gradle 8.14.4`).
-- `./gradlew test`: run the full test suite with JUnit 5 and Kotest.
-- `./gradlew bootRun`: start the API locally.
-- `./gradlew bootJar`: build the runnable JAR in `build/libs/`.
-- `docker build -t kotlin-springboot-sample .`: build the production container image.
-- `docker build -f Dockerfile-local -t kotlin-springboot-sample:local .`: build with the local Gradle-based Docker flow.
+- `mise install`: install pinned `java 21.0.2` and `gradle 8.14.4`
+- `mise run`: run `./gradlew bootRun`
+- `mise run test`: run the full test suite
+- `mise run build`: compile, test, and package the app
+- `./gradlew bootRun`: start the API directly
+- `./gradlew build`: full CI-equivalent build
 
 ## Coding Style & Naming Conventions
-Use standard Kotlin style with 4-space indentation and UTF-8 source files. Prefer `val` over `var` unless mutation is required by JPA or framework binding. Keep packages feature-oriented. Follow existing naming patterns such as `PostController`, `UserService`, `TokenProvider`, `PostRequest`, and `PostRepositoryTest`. No dedicated formatter or linter is configured, so use IntelliJ IDEA’s Kotlin formatter before committing.
+Use standard Kotlin style with 4-space indentation and UTF-8 files. Prefer `val` unless JPA or framework binding requires mutation. Keep controller DTOs in `presentation/*/{request,response}`, use `*UseCase` in `application`, and keep domain rules in `domain/*/policy`. Follow names like `PostUseCase`, `OrderUseCase`, `SignupCommand`, `OrderResult`, and `OrderRepositoryTest`.
 
 ## Testing Guidelines
-Use Spring Boot Test, Kotest, MockK, and SpringMockK. Name test files with the `*Test.kt` suffix and keep them in the same package path as the code they verify. Favor focused slice tests such as `@WebMvcTest` and `@DataJpaTest` before adding full `@SpringBootTest` coverage. Run `./gradlew test` before opening a PR.
+Use Spring Boot Test, Kotest, MockK, and SpringMockK. Name test files with the `*Test.kt` suffix and keep them in the same layered package path as the code they verify. Prefer `@WebMvcTest` for presentation tests and `@DataJpaTest` for JPA mapping checks such as `OrderRepositoryTest`.
 
 ## Commit & Pull Request Guidelines
-Recent history follows short prefix-based commits such as `feat:`, `fix:`, `test:`, `build:`, and `ci:`. Keep messages imperative and scoped, for example `fix: remove hard-coded identity id in data loader`. PRs should include a summary, linked issue if available, test results, and notes for any config, Docker, or CI changes. For API changes, include example request/response payloads.
+Recent history follows short prefixes such as `feat:`, `fix:`, `test:`, `build:`, and `ci:`. Keep commits imperative and focused. PRs should include a summary, test results, and notes for config or schema-impacting changes. For API changes, include request/response examples.
 
 ## Security & Configuration Tips
-Do not commit real secrets. Copy sample config values from `src/main/resources/*-sample.yml` into local-only files such as `application.yml` and `jwt.yml`. Keep JWT keys and environment-specific settings outside version control.
+Do not commit real secrets. Keep local-only overrides in ignored files such as `application.yml`, and use `application-sample.yml` as the shared template. JWT values required for tests are intentionally provided by `application-test.yml`.
