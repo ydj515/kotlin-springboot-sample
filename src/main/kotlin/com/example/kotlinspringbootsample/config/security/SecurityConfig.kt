@@ -1,7 +1,9 @@
 package com.example.kotlinspringbootsample.config.security
 
-import com.example.kotlinspringbootsample.filter.AuthFilter
-import com.example.kotlinspringbootsample.filter.CustomUsernamePasswordAuthenticationFilter
+import com.example.kotlinspringbootsample.infrastructure.security.AuthFilter
+import com.example.kotlinspringbootsample.infrastructure.security.CustomAuthenticationManager
+import com.example.kotlinspringbootsample.infrastructure.security.CustomUsernamePasswordAuthenticationFilter
+import com.example.kotlinspringbootsample.infrastructure.security.TokenProvider
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
