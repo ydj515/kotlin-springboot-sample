@@ -43,7 +43,8 @@
 - Java/MyBatis는 repository port + mapper adapter + 명시적 query/update 흐름을 유지한다.
 - domain service는 “필요한 곳에만” 도입한다.
   - MyBatis 쪽은 유지한다.
-  - JPA 쪽은 엔티티/정책으로 흡수 가능한 로직까지 억지로 domain service로 분리하지 않는다.
+  - JPA 쪽도 `domain/{도메인}/service` 패키지를 기본 구조에 포함한다.
+  - 다만 JPA 쪽은 엔티티/정책으로 흡수 가능한 로직까지 억지로 domain service로 분리하지 않는다.
 
 ## 비목표
 
@@ -236,11 +237,13 @@ src/main/kotlin/com/example/kotlinspringbootsample
 │   ├── order
 │   │   ├── exception
 │   │   ├── policy
-│   │   └── repository
+│   │   ├── repository
+│   │   └── service
 │   └── user
 │       ├── exception
 │       ├── policy
-│       └── repository
+│       ├── repository
+│       └── service
 ├── infrastructure
 │   ├── bootstrap
 │   └── security
@@ -261,6 +264,7 @@ src/main/kotlin/com/example/kotlinspringbootsample
 
 - `common.error`, `common.logging` 도입
 - `config.async` 도입
+- `domain.order.service`, `domain.user.service` 패키지 도입
 - `application.auth.command/result` 구조 추가
 - 필터 기반 로그인 대신 controller/usecase 기반 로그인으로 전환
 - 기존 `POST /signup` endpoint를 `POST /api/users`로 이동
@@ -342,7 +346,9 @@ src/main/java/org/example/javaspringbootmybatissample
 
 - aggregate 상태 변경은 엔티티 메서드와 policy 중심으로 유지한다.
 - repository는 Spring Data JPA port를 유지한다.
-- 다만 use case가 직접 repository lookup, validation, mutation, mapping을 과도하게 모두 품고 있으면 필요한 만큼 helper/domain service로 분리한다.
+- `domain/{도메인}/service` 패키지를 기본 구조로 두고, repository를 사용하는 도메인 행위는 우선 이 계층에 배치할지 검토한다.
+- 조회 보장, 중복 검사, aggregate 생성 보조처럼 repository를 수반하는 도메인 규칙은 domain service로 내린다.
+- 다만 상태 전이 자체와 aggregate 내부 불변식은 계속 엔티티 메서드와 policy에 둔다.
 
 ### Java/MyBatis 쪽 적용 원칙
 
@@ -381,13 +387,36 @@ src/main/java/org/example/javaspringbootmybatissample
 
 - `OrderUseCase`와 `UserUseCase`에서 “흐름 조합”에 해당하지 않는 세부 책임이 많은지 점검
 - JPA에서 자연스러운 범위 내에서만 분리
+- 최소 도입 대상은 아래와 같이 잡는다.
+  - `domain.order.service.OrderLookupService`
+    - 주문 ID 유효성 확인
+    - 주문 조회 보장
+  - `domain.user.service.UserRegistrationService`
+    - username 중복 확인
+    - 비즈니스 관점의 사용자 등록 규칙 조합
+  - `domain.user.service.UserLookupService`
+    - username 기반 사용자 조회 보장
 - `AuthUseCase`는 로그인 유스케이스만 담당하고, Spring Security adapter 책임은 `infrastructure.security`로 고정 분리
 
-#### 5. 테스트 정렬
+#### 5. Domain Service 배치 기준
+
+- `service`로 가는 것
+  - repository를 사용하는 도메인 규칙
+  - 여러 도메인 객체 또는 aggregate를 엮는 규칙
+  - 조회 실패를 도메인 예외로 승격하는 lookup 책임
+- `policy`에 남는 것
+  - 순수 검증 규칙
+  - 외부 저장소 접근 없이 입력값/상태만으로 판단 가능한 규칙
+- 엔티티에 남는 것
+  - 상태 전이
+  - aggregate 내부 컬렉션/합계/불변식 관리
+
+#### 6. 테스트 정렬
 
 - Kotest는 application/domain 테스트에 `BehaviorSpec`, web-layer 테스트에 `DescribeSpec`을 사용하고 `given / when / then` 서술을 유지
 - presentation, application, domain, logging/auth 테스트를 레이어별로 정리
 - MDC propagation, auth success/failure, error response traceId 노출 테스트 추가
+- 새 domain service는 각각 단위 테스트를 추가한다.
 
 ### B. Java/MyBatis 레포 변경 설계
 
