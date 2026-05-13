@@ -3,7 +3,6 @@ package com.example.kotlinspringbootsample.presentation.common
 import com.example.kotlinspringbootsample.domain.order.exception.InvalidOrderItemException
 import com.example.kotlinspringbootsample.domain.order.exception.InvalidOrderStatusTransitionException
 import com.example.kotlinspringbootsample.domain.order.exception.OrderNotFoundException
-import com.example.kotlinspringbootsample.domain.post.exception.PostNotFoundException
 import com.example.kotlinspringbootsample.domain.user.exception.UserAlreadyException
 import com.example.kotlinspringbootsample.domain.user.exception.UserException
 import org.springframework.dao.OptimisticLockingFailureException
@@ -43,15 +42,6 @@ class GlobalExceptionHandler {
             ApiResult.failure(
                 resultCode = ResultCode.INTERNAL_ERROR,
                 message = ex.message ?: ResultCode.INTERNAL_ERROR.message
-            )
-        )
-
-    @ExceptionHandler(PostNotFoundException::class)
-    fun handlePostNotFound(ex: PostNotFoundException): ResponseEntity<ApiResult.Failure> =
-        ResponseEntity.status(ResultCode.NOT_FOUND.status).body(
-            ApiResult.failure(
-                resultCode = ResultCode.NOT_FOUND,
-                message = ex.message ?: ResultCode.NOT_FOUND.message
             )
         )
 

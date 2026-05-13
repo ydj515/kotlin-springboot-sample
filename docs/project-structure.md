@@ -32,8 +32,6 @@
 
 ### 현재 도메인 예시
 
-- `presentation/post`, `application/post`, `domain/post`
-  - 게시글 CRUD와 soft delete 예제
 - `presentation/user`, `application/user`, `domain/user`
   - 회원가입과 등록 정책 예제
 - `presentation/order`, `application/order`, `domain/order`

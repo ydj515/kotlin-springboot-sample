@@ -9,7 +9,6 @@
 - 자기 상태만으로 수정 가능할 때
 - aggregate 내부 불변조건일 때
 - 예:
-  - `Post.update(...)`
   - `Order.replaceLines(...)`
   - `Order.markPaid()`
   - `Order.markShipped()`
@@ -21,7 +20,6 @@
 - 유스케이스 여러 곳에서 재사용될 수 있을 때
 - 저장소 조회가 없어도 판단 가능할 때
 - 예:
-  - `PostAuthorPolicy`
   - `UserRegistrationPolicy`
   - `OrderItemPolicy`
   - `OrderStatusTransitionPolicy`
@@ -68,8 +66,6 @@
 - 영속 상태 엔티티를 트랜잭션 안에서 수정할 때
 - save 재호출이 꼭 필요하지 않을 때
 - 예:
-  - `PostUseCase.updatePost(...)`
-  - `PostUseCase.deletePost(...)`
   - `OrderUseCase.payOrder(...)`
   - `OrderUseCase.shipOrder(...)`
   - `OrderUseCase.cancelOrder(...)`
@@ -180,13 +176,10 @@
 - 예:
   - `OrderResult`, `OrderSummaryResult`
   - `OrderStatusSummaryResult`
-  - `PostResult`
   - `SignupResult`
 
 ## 18. 현재 샘플에서 특히 보면 좋은 JPA 조합
 
-- `Post`
-  - soft delete + dirty checking
 - `User`
   - unique column + registration policy
 - `Order`

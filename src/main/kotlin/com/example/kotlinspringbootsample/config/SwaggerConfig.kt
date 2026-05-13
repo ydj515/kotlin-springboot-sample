@@ -68,9 +68,7 @@ class SwaggerConfig {
             SwaggerRefs.NOT_FOUND_RESPONSE_NAME,
             response(
                 description = "리소스를 찾을 수 없음",
-                "postNotFound" to SwaggerRefs.POST_NOT_FOUND_FAILURE_EXAMPLE_REF,
-                "orderNotFound" to SwaggerRefs.ORDER_NOT_FOUND_FAILURE_EXAMPLE_REF,
-                "authorCredentialsInvalid" to SwaggerRefs.POST_AUTHOR_FAILURE_EXAMPLE_REF
+                "orderNotFound" to SwaggerRefs.ORDER_NOT_FOUND_FAILURE_EXAMPLE_REF
             )
         )
         components.addResponses(
@@ -94,46 +92,6 @@ class SwaggerConfig {
             setSuccessResponse("201", "회원가입 성공", "success" to SwaggerRefs.SIGNUP_SUCCESS_EXAMPLE_REF)
             setResponseRef("400", SwaggerRefs.BAD_REQUEST_RESPONSE_REF)
             setResponseRef("409", SwaggerRefs.CONFLICT_RESPONSE_REF)
-        }
-
-        openApi.customizeGet("/api/posts") {
-            setSuccessResponse("200", "게시글 목록 조회 성공", "success" to SwaggerRefs.POST_LIST_SUCCESS_EXAMPLE_REF)
-            setParameterExample("page", 0)
-            setParameterExample("size", 10)
-        }
-
-        openApi.customizePost("/api/posts") {
-            requestBody = requestBody.withExamples(
-                description = "게시글 생성 요청 바디",
-                "request" to SwaggerRefs.POST_CREATE_REQUEST_EXAMPLE_REF
-            )
-            setSuccessResponse("201", "게시글 생성 성공", "success" to SwaggerRefs.POST_CREATE_SUCCESS_EXAMPLE_REF)
-        }
-
-        openApi.customizeGet("/api/posts/{id}") {
-            setSuccessResponse("200", "게시글 상세 조회 성공", "success" to SwaggerRefs.POST_DETAIL_SUCCESS_EXAMPLE_REF)
-            setResponseRef("404", SwaggerRefs.NOT_FOUND_RESPONSE_REF)
-            setParameterExample("id", 1)
-        }
-
-        openApi.customizePut("/api/posts/{id}") {
-            requestBody = requestBody.withExamples(
-                description = "게시글 수정 요청 바디",
-                "request" to SwaggerRefs.POST_UPDATE_REQUEST_EXAMPLE_REF
-            )
-            setSuccessResponse("200", "게시글 수정 성공", "success" to SwaggerRefs.POST_UPDATE_SUCCESS_EXAMPLE_REF)
-            setResponseRef("404", SwaggerRefs.NOT_FOUND_RESPONSE_REF)
-            setParameterExample("id", 1)
-        }
-
-        openApi.customizeDelete("/api/posts/{id}") {
-            requestBody = requestBody.withExamples(
-                description = "게시글 삭제 요청 바디",
-                "request" to SwaggerRefs.POST_DELETE_REQUEST_EXAMPLE_REF
-            )
-            setSuccessResponse("200", "게시글 삭제 성공", "success" to SwaggerRefs.POST_DELETE_SUCCESS_EXAMPLE_REF)
-            setResponseRef("404", SwaggerRefs.NOT_FOUND_RESPONSE_REF)
-            setParameterExample("id", 1)
         }
 
         openApi.customizeGet("/api/orders/status-summary") {
@@ -204,47 +162,6 @@ class SwaggerConfig {
         addExamples(
             SwaggerRefs.SIGNUP_ALREADY_EXISTS_FAILURE_EXAMPLE_NAME,
             example("이미 존재하는 사용자", SIGNUP_ALREADY_EXISTS_FAILURE_EXAMPLE)
-        )
-
-        addExamples(
-            SwaggerRefs.POST_CREATE_REQUEST_EXAMPLE_NAME,
-            example("게시글 생성 요청", POST_CREATE_REQUEST_EXAMPLE)
-        )
-        addExamples(
-            SwaggerRefs.POST_UPDATE_REQUEST_EXAMPLE_NAME,
-            example("게시글 수정 요청", POST_UPDATE_REQUEST_EXAMPLE)
-        )
-        addExamples(
-            SwaggerRefs.POST_DELETE_REQUEST_EXAMPLE_NAME,
-            example("게시글 삭제 요청", POST_DELETE_REQUEST_EXAMPLE)
-        )
-        addExamples(
-            SwaggerRefs.POST_LIST_SUCCESS_EXAMPLE_NAME,
-            example("게시글 목록 조회 성공", POST_LIST_SUCCESS_EXAMPLE)
-        )
-        addExamples(
-            SwaggerRefs.POST_DETAIL_SUCCESS_EXAMPLE_NAME,
-            example("게시글 상세 조회 성공", POST_DETAIL_SUCCESS_EXAMPLE)
-        )
-        addExamples(
-            SwaggerRefs.POST_CREATE_SUCCESS_EXAMPLE_NAME,
-            example("게시글 생성 성공", POST_CREATE_SUCCESS_EXAMPLE)
-        )
-        addExamples(
-            SwaggerRefs.POST_UPDATE_SUCCESS_EXAMPLE_NAME,
-            example("게시글 수정 성공", POST_UPDATE_SUCCESS_EXAMPLE)
-        )
-        addExamples(
-            SwaggerRefs.POST_DELETE_SUCCESS_EXAMPLE_NAME,
-            example("게시글 삭제 성공", POST_DELETE_SUCCESS_EXAMPLE)
-        )
-        addExamples(
-            SwaggerRefs.POST_NOT_FOUND_FAILURE_EXAMPLE_NAME,
-            example("게시글을 찾을 수 없음", POST_NOT_FOUND_FAILURE_EXAMPLE)
-        )
-        addExamples(
-            SwaggerRefs.POST_AUTHOR_FAILURE_EXAMPLE_NAME,
-            example("작성자 인증 실패", POST_AUTHOR_FAILURE_EXAMPLE)
         )
 
         addExamples(
@@ -321,19 +238,13 @@ class SwaggerConfig {
     }
 
     private fun OpenAPI.customizeGet(path: String, block: Operation.() -> Unit) {
-        paths?.get(path)?.get?.apply(block)
+        val pathItem = paths?.get(path) ?: return
+        pathItem.get?.apply(block)
     }
 
     private fun OpenAPI.customizePost(path: String, block: Operation.() -> Unit) {
-        paths?.get(path)?.post?.apply(block)
-    }
-
-    private fun OpenAPI.customizePut(path: String, block: Operation.() -> Unit) {
-        paths?.get(path)?.put?.apply(block)
-    }
-
-    private fun OpenAPI.customizeDelete(path: String, block: Operation.() -> Unit) {
-        paths?.get(path)?.delete?.apply(block)
+        val pathItem = paths?.get(path) ?: return
+        pathItem.post?.apply(block)
     }
 
     private fun RequestBody?.withExamples(description: String, vararg examples: Pair<String, String>): RequestBody {
@@ -397,36 +308,6 @@ private const val SIGNUP_VALIDATION_FAILURE_EXAMPLE =
 
 private const val SIGNUP_ALREADY_EXISTS_FAILURE_EXAMPLE =
     """{"result":"failure","code":"409","message":"user already exists","timestamp":"2026-05-08T13:30:00","errors":null}"""
-
-private const val POST_CREATE_REQUEST_EXAMPLE =
-    """{"title":"New Post","content":"This is a new post","username":"userA","password":"password1"}"""
-
-private const val POST_UPDATE_REQUEST_EXAMPLE =
-    """{"title":"Updated Post","content":"This is an updated post","username":"userA","password":"password1"}"""
-
-private const val POST_DELETE_REQUEST_EXAMPLE =
-    """{"username":"userA","password":"password1"}"""
-
-private const val POST_LIST_SUCCESS_EXAMPLE =
-    """{"result":"success","code":"200","message":"Success","timestamp":"2026-05-08T13:30:00","data":{"content":[{"title":"First Post","content":"This is the first post","username":"userA"},{"title":"Second Post","content":"This is the second post","username":"userB"}],"pageable":{"pageNumber":0,"pageSize":10},"totalElements":2,"totalPages":1}}"""
-
-private const val POST_DETAIL_SUCCESS_EXAMPLE =
-    """{"result":"success","code":"200","message":"Success","timestamp":"2026-05-08T13:30:00","data":{"title":"First Post","content":"This is the first post","username":"userA"}}"""
-
-private const val POST_CREATE_SUCCESS_EXAMPLE =
-    """{"result":"success","code":"201","message":"Created","timestamp":"2026-05-08T13:30:00","data":{"title":"New Post","content":"This is a new post","username":"userA"}}"""
-
-private const val POST_UPDATE_SUCCESS_EXAMPLE =
-    """{"result":"success","code":"200","message":"Success","timestamp":"2026-05-08T13:30:00","data":{"title":"Updated Post","content":"This is an updated post","username":"userA"}}"""
-
-private const val POST_DELETE_SUCCESS_EXAMPLE =
-    """{"result":"success","code":"200","message":"Success","timestamp":"2026-05-08T13:30:00","data":{"message":"Post deleted successfully"}}"""
-
-private const val POST_NOT_FOUND_FAILURE_EXAMPLE =
-    """{"result":"failure","code":"404","message":"Post not found with id 999","timestamp":"2026-05-08T13:30:00","errors":null}"""
-
-private const val POST_AUTHOR_FAILURE_EXAMPLE =
-    """{"result":"failure","code":"404","message":"username or password invalid","timestamp":"2026-05-08T13:30:00","errors":null}"""
 
 private const val ORDER_CREATE_REQUEST_EXAMPLE =
     """{"buyerUsername":"alice","shippingAddress":{"recipient":"Alice Kim","zipCode":"06236","address1":"Seoul Gangnam-daero 123","address2":"10F"},"items":[{"productName":"Mechanical Keyboard","quantity":1,"unitPrice":129000.00},{"productName":"Palm Rest","quantity":1,"unitPrice":25000.00}]}"""

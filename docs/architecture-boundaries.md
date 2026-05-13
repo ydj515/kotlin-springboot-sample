@@ -21,7 +21,6 @@
 
 예:
 
-- `PostUseCase`
 - `UserUseCase`
 - `OrderUseCase`
 
@@ -32,7 +31,6 @@
 
 예:
 
-- `PostAuthorPolicy`
 - `UserRegistrationPolicy`
 - `OrderItemPolicy`
 
@@ -71,8 +69,6 @@
 
 ## 현재 프로젝트에서 특히 보는 포인트
 
-- `Post`
-  - application이 dirty checking 흐름만 제어하고, soft delete는 엔티티가 담당합니다.
 - `User`
   - 중복 username 판단은 `UserRegistrationPolicy`가 담당합니다.
 - `Order`

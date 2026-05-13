@@ -20,28 +20,6 @@ object SwaggerRefs {
     const val SIGNUP_ALREADY_EXISTS_FAILURE_EXAMPLE_REF =
         "#/components/examples/$SIGNUP_ALREADY_EXISTS_FAILURE_EXAMPLE_NAME"
 
-    const val POST_CREATE_REQUEST_EXAMPLE_NAME = "PostCreateRequest"
-    const val POST_CREATE_REQUEST_EXAMPLE_REF = "#/components/examples/$POST_CREATE_REQUEST_EXAMPLE_NAME"
-    const val POST_UPDATE_REQUEST_EXAMPLE_NAME = "PostUpdateRequest"
-    const val POST_UPDATE_REQUEST_EXAMPLE_REF = "#/components/examples/$POST_UPDATE_REQUEST_EXAMPLE_NAME"
-    const val POST_DELETE_REQUEST_EXAMPLE_NAME = "PostDeleteRequest"
-    const val POST_DELETE_REQUEST_EXAMPLE_REF = "#/components/examples/$POST_DELETE_REQUEST_EXAMPLE_NAME"
-    const val POST_LIST_SUCCESS_EXAMPLE_NAME = "PostListSuccess"
-    const val POST_LIST_SUCCESS_EXAMPLE_REF = "#/components/examples/$POST_LIST_SUCCESS_EXAMPLE_NAME"
-    const val POST_DETAIL_SUCCESS_EXAMPLE_NAME = "PostDetailSuccess"
-    const val POST_DETAIL_SUCCESS_EXAMPLE_REF = "#/components/examples/$POST_DETAIL_SUCCESS_EXAMPLE_NAME"
-    const val POST_CREATE_SUCCESS_EXAMPLE_NAME = "PostCreateSuccess"
-    const val POST_CREATE_SUCCESS_EXAMPLE_REF = "#/components/examples/$POST_CREATE_SUCCESS_EXAMPLE_NAME"
-    const val POST_UPDATE_SUCCESS_EXAMPLE_NAME = "PostUpdateSuccess"
-    const val POST_UPDATE_SUCCESS_EXAMPLE_REF = "#/components/examples/$POST_UPDATE_SUCCESS_EXAMPLE_NAME"
-    const val POST_DELETE_SUCCESS_EXAMPLE_NAME = "PostDeleteSuccess"
-    const val POST_DELETE_SUCCESS_EXAMPLE_REF = "#/components/examples/$POST_DELETE_SUCCESS_EXAMPLE_NAME"
-    const val POST_NOT_FOUND_FAILURE_EXAMPLE_NAME = "PostNotFoundFailure"
-    const val POST_NOT_FOUND_FAILURE_EXAMPLE_REF =
-        "#/components/examples/$POST_NOT_FOUND_FAILURE_EXAMPLE_NAME"
-    const val POST_AUTHOR_FAILURE_EXAMPLE_NAME = "PostAuthorFailure"
-    const val POST_AUTHOR_FAILURE_EXAMPLE_REF = "#/components/examples/$POST_AUTHOR_FAILURE_EXAMPLE_NAME"
-
     const val ORDER_CREATE_REQUEST_EXAMPLE_NAME = "OrderCreateRequest"
     const val ORDER_CREATE_REQUEST_EXAMPLE_REF = "#/components/examples/$ORDER_CREATE_REQUEST_EXAMPLE_NAME"
     const val ORDER_STATUS_SUMMARY_SUCCESS_EXAMPLE_NAME = "OrderStatusSummarySuccess"

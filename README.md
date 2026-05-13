@@ -44,8 +44,6 @@ mise run build
 
 현재 샘플 도메인:
 
-- `post`
-  - soft delete, dirty checking, paging 예제
 - `user`
   - 회원가입, unique username 정책 예제
 - `order`
@@ -53,9 +51,6 @@ mise run build
 
 ## JPA Examples
 
-- `Post`
-  - 수정 시 명시적 `save()` 없이 dirty checking으로 반영
-  - `deletedAt` 기반 soft delete
 - `Order`
   - `Order -> User` : `@ManyToOne(fetch = LAZY)`
   - `Order -> OrderLine` : `@OneToMany(cascade = ALL, orphanRemoval = true)`
@@ -73,9 +68,6 @@ mise run build
 ## Sample API
 
 - `POST /signup`
-- `GET /api/posts`
-- `GET /api/posts/{id}`
-- `POST /api/posts`
 - `GET /api/orders`
 - `GET /api/orders?status=PAID&searchMode=DERIVED`
 - `GET /api/orders?buyerUsername=alice&status=PAID&searchMode=JPQL`

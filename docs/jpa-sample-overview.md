@@ -3,7 +3,7 @@
 ## 개요
 
 이 프로젝트는 단순 JPA CRUD 예제보다 조금 더 넓은 범위를 보여주는 데 목적이 있습니다.  
-현재는 `post`, `user`, `order` 세 도메인을 통해 JPA에서 자주 마주치는 설계 포인트를 샘플 형태로 담고 있습니다.
+현재는 `user`, `order` 두 도메인을 통해 JPA에서 자주 마주치는 설계 포인트를 샘플 형태로 담고 있습니다.
 
 ## 이 문서를 보면 좋은 경우
 
@@ -12,13 +12,6 @@
 - JPA 학습용으로 어떤 파일부터 보면 좋은지 찾고 싶을 때
 
 ## 핵심 예제 포인트
-
-### `Post`
-
-- `deletedAt` 기반 soft delete
-- `findAllByDeletedAtIsNull(...)` paging 조회
-- dirty checking 기반 수정
-- `PostAuthorPolicy`를 통한 작성자 검증
 
 ### `User`
 
@@ -62,12 +55,6 @@
 
 ## 예시 API
 
-### Post
-
-- `GET /api/posts`
-- `GET /api/posts/{id}`
-- `POST /api/posts`
-
 ### User
 
 - `POST /signup`
@@ -87,7 +74,6 @@
 
 ## 예시로 보면 좋은 파일
 
-- `domain/post/Post.kt`
 - `domain/user/policy/UserRegistrationPolicy.kt`
 - `domain/order/Order.kt`
 - `domain/order/OrderLine.kt`

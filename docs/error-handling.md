@@ -15,7 +15,6 @@
 
 ## 현재 처리하는 예외 예시
 
-- `PostNotFoundException`
 - `OrderNotFoundException`
 - `InvalidOrderItemException`
 - `UserAlreadyException`
@@ -29,7 +28,7 @@
 
 ## 예시
 
-- 게시글이 없을 때:
+- 주문이 없을 때:
   - `404`, `result = failure`
 - 주문 item이 비어 있거나 수량/가격이 잘못됐을 때:
   - `400`, `result = failure`

@@ -58,8 +58,6 @@
 
 ### 현재 샘플 도메인
 
-- `post`
-  - paging, soft delete, dirty checking
 - `user`
   - 회원가입과 unique username 정책
 - `order`

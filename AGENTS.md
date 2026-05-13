@@ -19,7 +19,7 @@ Tests mirror the same structure under `src/test/kotlin`. Runtime examples live i
 - `./gradlew build`: full CI-equivalent build
 
 ## Coding Style & Naming Conventions
-Use standard Kotlin style with 4-space indentation and UTF-8 files. Prefer `val` unless JPA or framework binding requires mutation. Keep controller DTOs in `presentation/*/{request,response}`, use `*UseCase` in `application`, and keep domain rules in `domain/*/policy`. Follow names like `PostUseCase`, `OrderUseCase`, `SignupCommand`, `OrderResult`, and `OrderRepositoryTest`.
+Use standard Kotlin style with 4-space indentation and UTF-8 files. Prefer `val` unless JPA or framework binding requires mutation. Keep controller DTOs in `presentation/*/{request,response}`, use `*UseCase` in `application`, and keep domain rules in `domain/*/policy`. Follow names like `OrderUseCase`, `SignupCommand`, `OrderResult`, and `OrderRepositoryTest`.
 
 ## Testing Guidelines
 Use Spring Boot Test, Kotest, MockK, and SpringMockK. Name test files with the `*Test.kt` suffix and keep them in the same layered package path as the code they verify. Prefer `@WebMvcTest` for presentation tests and `@DataJpaTest` for JPA mapping checks such as `OrderRepositoryTest`.

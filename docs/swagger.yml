@@ -10,107 +10,9 @@ servers:
 tags:
 - name: Users
   description: 회원가입 API
-- name: Posts
-  description: 게시글 조회와 생성/수정/삭제 API
 - name: Orders
   description: 주문 조회와 상태 전이 API
 paths:
-  "/api/posts/{id}":
-    get:
-      tags:
-      - Posts
-      summary: 게시글 단건 조회
-      description: 게시글 ID로 상세 내용을 조회합니다.
-      operationId: getPostById
-      parameters:
-      - name: id
-        in: path
-        description: 게시글 ID
-        required: true
-        schema:
-          type: integer
-          format: int64
-        example: 1
-      responses:
-        '200':
-          description: 게시글 상세 조회 성공
-          content:
-            application/json:
-              examples:
-                success:
-                  "$ref": "#/components/examples/PostDetailSuccess"
-        '404':
-          "$ref": "#/components/responses/NotFoundResponse"
-    put:
-      tags:
-      - Posts
-      summary: 게시글 수정
-      description: 작성자 정보가 일치하는 게시글을 수정합니다.
-      operationId: updatePost
-      parameters:
-      - name: id
-        in: path
-        description: 게시글 ID
-        required: true
-        schema:
-          type: integer
-          format: int64
-        example: 1
-      requestBody:
-        description: 게시글 수정 요청 바디
-        content:
-          application/json:
-            schema:
-              "$ref": "#/components/schemas/PostRequest"
-            examples:
-              request:
-                "$ref": "#/components/examples/PostUpdateRequest"
-        required: true
-      responses:
-        '200':
-          description: 게시글 수정 성공
-          content:
-            application/json:
-              examples:
-                success:
-                  "$ref": "#/components/examples/PostUpdateSuccess"
-        '404':
-          "$ref": "#/components/responses/NotFoundResponse"
-    delete:
-      tags:
-      - Posts
-      summary: 게시글 삭제
-      description: 작성자 정보가 일치하는 게시글을 삭제합니다.
-      operationId: deletePost
-      parameters:
-      - name: id
-        in: path
-        description: 게시글 ID
-        required: true
-        schema:
-          type: integer
-          format: int64
-        example: 1
-      requestBody:
-        description: 게시글 삭제 요청 바디
-        content:
-          application/json:
-            schema:
-              "$ref": "#/components/schemas/PostDeleteRequest"
-            examples:
-              request:
-                "$ref": "#/components/examples/PostDeleteRequest"
-        required: true
-      responses:
-        '200':
-          description: 게시글 삭제 성공
-          content:
-            application/json:
-              examples:
-                success:
-                  "$ref": "#/components/examples/PostDeleteSuccess"
-        '404':
-          "$ref": "#/components/responses/NotFoundResponse"
   "/signup":
     post:
       tags:
@@ -140,64 +42,6 @@ paths:
           "$ref": "#/components/responses/BadRequestResponse"
         '409':
           "$ref": "#/components/responses/ConflictResponse"
-  "/api/posts":
-    get:
-      tags:
-      - Posts
-      summary: 게시글 목록 조회
-      description: 페이지 단위로 게시글 목록을 조회합니다.
-      operationId: getPosts
-      parameters:
-      - name: page
-        in: query
-        description: 페이지 번호
-        required: false
-        schema:
-          type: integer
-          format: int32
-          default: 0
-        example: 0
-      - name: size
-        in: query
-        description: 페이지 크기
-        required: false
-        schema:
-          type: integer
-          format: int32
-          default: 10
-        example: 10
-      responses:
-        '200':
-          description: 게시글 목록 조회 성공
-          content:
-            application/json:
-              examples:
-                success:
-                  "$ref": "#/components/examples/PostListSuccess"
-    post:
-      tags:
-      - Posts
-      summary: 게시글 생성
-      description: 새 게시글을 생성합니다.
-      operationId: createPost
-      requestBody:
-        description: 게시글 생성 요청 바디
-        content:
-          application/json:
-            schema:
-              "$ref": "#/components/schemas/PostRequest"
-            examples:
-              request:
-                "$ref": "#/components/examples/PostCreateRequest"
-        required: true
-      responses:
-        '201':
-          description: 게시글 생성 성공
-          content:
-            application/json:
-              examples:
-                success:
-                  "$ref": "#/components/examples/PostCreateSuccess"
   "/api/orders":
     get:
       tags:
@@ -440,22 +284,6 @@ paths:
           "$ref": "#/components/responses/BadRequestResponse"
 components:
   schemas:
-    PostRequest:
-      type: object
-      properties:
-        title:
-          type: string
-        content:
-          type: string
-        username:
-          type: string
-        password:
-          type: string
-      required:
-      - content
-      - password
-      - title
-      - username
     SignupRequest:
       type: object
       properties:
@@ -517,16 +345,6 @@ components:
       - address2
       - recipient
       - zipCode
-    PostDeleteRequest:
-      type: object
-      properties:
-        username:
-          type: string
-        password:
-          type: string
-      required:
-      - password
-      - username
   responses:
     BadRequestResponse:
       description: 잘못된 요청
@@ -544,12 +362,8 @@ components:
       content:
         application/json:
           examples:
-            postNotFound:
-              "$ref": "#/components/examples/PostNotFoundFailure"
             orderNotFound:
               "$ref": "#/components/examples/OrderNotFoundFailure"
-            authorCredentialsInvalid:
-              "$ref": "#/components/examples/PostAuthorFailure"
     ConflictResponse:
       description: 상태 충돌 또는 중복 요청
       content:
@@ -592,103 +406,6 @@ components:
         result: failure
         code: '409'
         message: user already exists
-        timestamp: '2026-05-08T13:30:00'
-        errors: 
-    PostCreateRequest:
-      summary: 게시글 생성 요청
-      value:
-        title: New Post
-        content: This is a new post
-        username: userA
-        password: password1
-    PostUpdateRequest:
-      summary: 게시글 수정 요청
-      value:
-        title: Updated Post
-        content: This is an updated post
-        username: userA
-        password: password1
-    PostDeleteRequest:
-      summary: 게시글 삭제 요청
-      value:
-        username: userA
-        password: password1
-    PostListSuccess:
-      summary: 게시글 목록 조회 성공
-      value:
-        result: success
-        code: '200'
-        message: Success
-        timestamp: '2026-05-08T13:30:00'
-        data:
-          content:
-          - title: First Post
-            content: This is the first post
-            username: userA
-          - title: Second Post
-            content: This is the second post
-            username: userB
-          pageable:
-            pageNumber: 0
-            pageSize: 10
-          totalElements: 2
-          totalPages: 1
-    PostDetailSuccess:
-      summary: 게시글 상세 조회 성공
-      value:
-        result: success
-        code: '200'
-        message: Success
-        timestamp: '2026-05-08T13:30:00'
-        data:
-          title: First Post
-          content: This is the first post
-          username: userA
-    PostCreateSuccess:
-      summary: 게시글 생성 성공
-      value:
-        result: success
-        code: '201'
-        message: Created
-        timestamp: '2026-05-08T13:30:00'
-        data:
-          title: New Post
-          content: This is a new post
-          username: userA
-    PostUpdateSuccess:
-      summary: 게시글 수정 성공
-      value:
-        result: success
-        code: '200'
-        message: Success
-        timestamp: '2026-05-08T13:30:00'
-        data:
-          title: Updated Post
-          content: This is an updated post
-          username: userA
-    PostDeleteSuccess:
-      summary: 게시글 삭제 성공
-      value:
-        result: success
-        code: '200'
-        message: Success
-        timestamp: '2026-05-08T13:30:00'
-        data:
-          message: Post deleted successfully
-    PostNotFoundFailure:
-      summary: 게시글을 찾을 수 없음
-      value:
-        result: failure
-        code: '404'
-        message: Post not found with id 999
-        timestamp: '2026-05-08T13:30:00'
-        errors: 
-    PostAuthorFailure:
-      summary: 작성자 인증 실패
-      value:
-        result: failure
-        code: '404'
-        message: username or password invalid
         timestamp: '2026-05-08T13:30:00'
         errors: 
     OrderCreateRequest:
