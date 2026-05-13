@@ -18,8 +18,11 @@ sealed interface ApiResult<out T> {
     }
 
     data class Failure(
+        val status: Int,
         override val code: String,
         override val message: String,
+        val path: String? = null,
+        val traceId: String? = null,
         val errors: Any? = null,
         override val timestamp: LocalDateTime = LocalDateTime.now()
     ) : ApiResult<Nothing> {
@@ -39,11 +42,17 @@ sealed interface ApiResult<out T> {
 
         fun failure(
             resultCode: ResultCode,
+            status: Int = resultCode.status.value(),
             message: String = resultCode.message,
+            path: String? = null,
+            traceId: String? = null,
             errors: Any? = null
         ): Failure = Failure(
+            status = status,
             code = resultCode.code,
             message = message,
+            path = path,
+            traceId = traceId,
             errors = errors
         )
     }
