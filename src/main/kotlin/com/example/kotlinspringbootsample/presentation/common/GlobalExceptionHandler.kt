@@ -2,7 +2,9 @@ package com.example.kotlinspringbootsample.presentation.common
 
 import com.example.kotlinspringbootsample.common.error.BusinessException
 import jakarta.servlet.http.HttpServletRequest
+import org.slf4j.LoggerFactory
 import org.springframework.dao.OptimisticLockingFailureException
+import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
@@ -45,15 +47,18 @@ class GlobalExceptionHandler {
     fun handleBusinessException(
         ex: BusinessException,
         request: HttpServletRequest
-    ): ResponseEntity<ApiResult.Failure> =
-        ResponseEntity.status(ex.status).body(
+    ): ResponseEntity<ApiResult.Failure> {
+        val status = HttpStatus.resolve(ex.statusCode) ?: HttpStatus.INTERNAL_SERVER_ERROR
+        val resultCode = ResultCode.entries.firstOrNull { it.code == ex.errorCode } ?: ResultCode.from(ex.statusCode)
+        return ResponseEntity.status(status).body(
             failureBody(
-                resultCode = ex.resultCode,
+                resultCode = resultCode,
                 request = request,
-                status = ex.status.value(),
-                message = ex.message ?: ex.resultCode.message
+                status = status.value(),
+                message = ex.message ?: resultCode.message
             )
         )
+    }
 
     @ExceptionHandler(OptimisticLockingFailureException::class)
     fun handleOptimisticLockingFailure(
@@ -71,12 +76,13 @@ class GlobalExceptionHandler {
     @ExceptionHandler(Exception::class)
     fun handleAllExceptions(ex: Exception, request: HttpServletRequest): ResponseEntity<ApiResult.Failure> {
         val status = ResultCode.INTERNAL_ERROR.status
+        log.error("Unexpected exception occurred. path={}", request.requestURI, ex)
         return ResponseEntity.status(status).body(
             failureBody(
                 resultCode = ResultCode.from(status),
                 request = request,
                 status = status.value(),
-                message = ex.message ?: ResultCode.INTERNAL_ERROR.message
+                message = ResultCode.INTERNAL_ERROR.message
             )
         )
     }
@@ -102,6 +108,7 @@ class GlobalExceptionHandler {
             ?: request.getAttribute(TRACE_ID_ATTRIBUTE)?.toString()
 
     companion object {
+        private val log = LoggerFactory.getLogger(GlobalExceptionHandler::class.java)
         private const val TRACE_ID_HEADER = "X-Trace-Id"
         private const val TRACE_ID_ATTRIBUTE = "traceId"
     }

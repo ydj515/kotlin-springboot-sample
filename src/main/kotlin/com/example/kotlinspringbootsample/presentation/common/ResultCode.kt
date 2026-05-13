@@ -18,7 +18,15 @@ enum class ResultCode(
     ;
 
     companion object {
-        fun from(status: HttpStatus): ResultCode =
-            entries.firstOrNull { it.status == status } ?: INTERNAL_ERROR
+        fun from(status: HttpStatus): ResultCode = from(status.value())
+
+        fun from(statusCode: Int): ResultCode =
+            when (statusCode) {
+                400 -> INVALID_REQUEST
+                404 -> NOT_FOUND
+                409 -> CONFLICT
+                500 -> INTERNAL_ERROR
+                else -> INTERNAL_ERROR
+            }
     }
 }
