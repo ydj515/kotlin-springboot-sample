@@ -4,10 +4,7 @@ import com.example.kotlinspringbootsample.application.user.UserUseCase
 import com.example.kotlinspringbootsample.application.user.command.SignupCommand
 import com.example.kotlinspringbootsample.application.user.result.SignupResult
 import com.example.kotlinspringbootsample.config.logging.MdcLoggingFilter
-import com.example.kotlinspringbootsample.infrastructure.security.CustomAuthenticationManager
-import com.example.kotlinspringbootsample.infrastructure.security.TokenProvider
 import com.example.kotlinspringbootsample.presentation.user.request.SignupRequest
-import com.example.kotlinspringbootsample.presentation.user.response.SignupResponse
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.ninjasquad.springmockk.MockkBean
 import io.kotest.core.spec.style.DescribeSpec
@@ -35,21 +32,19 @@ import org.springframework.test.web.servlet.post
 @Import(MdcLoggingFilter::class)
 class UserControllerTest(
     @Autowired private val mockMvc: org.springframework.test.web.servlet.MockMvc,
-    @MockkBean private val userUseCase: UserUseCase,
-    @MockkBean private val customAuthenticationManager: CustomAuthenticationManager,
-    @MockkBean private val tokenProvider: TokenProvider
+    @MockkBean private val userUseCase: UserUseCase
 ) : DescribeSpec({
 
     val mapper = jacksonObjectMapper()
 
-    describe("POST /signup") {
+    describe("POST /api/users") {
         it("회원가입 성공 시 sealed success 포맷으로 201을 반환한다") {
             val request = SignupRequest("user1", "password1")
             val command = SignupCommand("user1", "password1")
             val response = SignupResult("user1")
             every { userUseCase.registerMember(command) } returns response
 
-            mockMvc.post("/signup") {
+            mockMvc.post("/api/users") {
                 contentType = MediaType.APPLICATION_JSON
                 content = mapper.writeValueAsString(request)
             }.andExpect {
@@ -65,7 +60,7 @@ class UserControllerTest(
         it("유효성 검증 실패 시 sealed failure 포맷으로 400을 반환한다") {
             val invalidRequest = SignupRequest("ab", "x")
 
-            mockMvc.post("/signup") {
+            mockMvc.post("/api/users") {
                 contentType = MediaType.APPLICATION_JSON
                 content = mapper.writeValueAsString(invalidRequest)
             }.andExpect {
@@ -77,64 +72,62 @@ class UserControllerTest(
             }
         }
 
-        describe("POST /api/users") {
-            it("X-Request-Id를 유지하고 X-Trace-Id를 응답 헤더에 포함한다") {
-                val request = SignupRequest("user1", "password1")
-                val command = SignupCommand("user1", "password1")
-                val response = SignupResult("user1")
-                val requestId = "request-id-001"
-                every { userUseCase.registerMember(command) } returns response
+        it("X-Request-Id를 유지하고 X-Trace-Id를 응답 헤더에 포함한다") {
+            val request = SignupRequest("user1", "password1")
+            val command = SignupCommand("user1", "password1")
+            val response = SignupResult("user1")
+            val requestId = "request-id-001"
+            every { userUseCase.registerMember(command) } returns response
 
-                mockMvc.post("/api/users") {
-                    header("X-Request-Id", requestId)
-                    contentType = MediaType.APPLICATION_JSON
-                    content = mapper.writeValueAsString(request)
-                }.andExpect {
-                    status { isCreated() }
-                    header { string("X-Request-Id", requestId) }
-                    header { string("X-Trace-Id", matchesPattern("[A-Za-z0-9._-]{1,128}")) }
-                }
-
-                verify { userUseCase.registerMember(command) }
+            mockMvc.post("/api/users") {
+                header("X-Request-Id", requestId)
+                contentType = MediaType.APPLICATION_JSON
+                content = mapper.writeValueAsString(request)
+            }.andExpect {
+                status { isCreated() }
+                header { string("X-Request-Id", requestId) }
+                header { string("X-Trace-Id", matchesPattern("[A-Za-z0-9._-]{1,128}")) }
             }
 
-            it("허용되지 않은 request/trace header는 안전한 새 값으로 대체한다") {
-                val request = SignupRequest("user1", "password1")
-                val command = SignupCommand("user1", "password1")
-                val response = SignupResult("user1")
-                val invalidRequestId = "bad request id"
-                val invalidTraceId = "trace\npoison"
-                every { userUseCase.registerMember(command) } returns response
+            verify { userUseCase.registerMember(command) }
+        }
 
-                mockMvc.post("/api/users") {
-                    header("X-Request-Id", invalidRequestId)
-                    header("X-Trace-Id", invalidTraceId)
-                    contentType = MediaType.APPLICATION_JSON
-                    content = mapper.writeValueAsString(request)
-                }.andExpect {
-                    status { isCreated() }
-                    header {
-                        string(
-                            "X-Request-Id",
-                            allOf(
-                                matchesPattern("[A-Za-z0-9._-]{1,128}"),
-                                not(equalTo(invalidRequestId))
-                            )
+        it("허용되지 않은 request/trace header는 안전한 새 값으로 대체한다") {
+            val request = SignupRequest("user1", "password1")
+            val command = SignupCommand("user1", "password1")
+            val response = SignupResult("user1")
+            val invalidRequestId = "bad request id"
+            val invalidTraceId = "trace\npoison"
+            every { userUseCase.registerMember(command) } returns response
+
+            mockMvc.post("/api/users") {
+                header("X-Request-Id", invalidRequestId)
+                header("X-Trace-Id", invalidTraceId)
+                contentType = MediaType.APPLICATION_JSON
+                content = mapper.writeValueAsString(request)
+            }.andExpect {
+                status { isCreated() }
+                header {
+                    string(
+                        "X-Request-Id",
+                        allOf(
+                            matchesPattern("[A-Za-z0-9._-]{1,128}"),
+                            not(equalTo(invalidRequestId))
                         )
-                    }
-                    header {
-                        string(
-                            "X-Trace-Id",
-                            allOf(
-                                matchesPattern("[A-Za-z0-9._-]{1,128}"),
-                                not(equalTo(invalidTraceId))
-                            )
-                        )
-                    }
+                    )
                 }
-
-                verify { userUseCase.registerMember(command) }
+                header {
+                    string(
+                        "X-Trace-Id",
+                        allOf(
+                            matchesPattern("[A-Za-z0-9._-]{1,128}"),
+                            not(equalTo(invalidTraceId))
+                        )
+                    )
+                }
             }
+
+            verify { userUseCase.registerMember(command) }
         }
     }
 })
