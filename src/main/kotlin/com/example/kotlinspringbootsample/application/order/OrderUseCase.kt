@@ -11,6 +11,7 @@ import com.example.kotlinspringbootsample.application.order.command.ShipOrderCom
 import com.example.kotlinspringbootsample.application.order.result.OrderResult
 import com.example.kotlinspringbootsample.application.order.result.OrderStatusSummaryResult
 import com.example.kotlinspringbootsample.application.order.result.OrderSummaryResult
+import com.example.kotlinspringbootsample.domain.customer.service.CustomerLookupService
 import com.example.kotlinspringbootsample.domain.order.Order
 import com.example.kotlinspringbootsample.domain.order.OrderLineDraft
 import com.example.kotlinspringbootsample.domain.order.OrderStatus
@@ -18,28 +19,29 @@ import com.example.kotlinspringbootsample.domain.order.policy.OrderItemPolicy
 import com.example.kotlinspringbootsample.domain.order.policy.OrderStatusTransitionPolicy
 import com.example.kotlinspringbootsample.domain.order.repository.OrderRepository
 import com.example.kotlinspringbootsample.domain.order.service.OrderLookupService
-import com.example.kotlinspringbootsample.domain.user.service.UserLookupService
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.time.LocalDateTime
+import java.util.UUID
 
 @Service
 @Transactional(readOnly = true)
 class OrderUseCase(
     private val orderRepository: OrderRepository,
-    private val userLookupService: UserLookupService,
+    private val customerLookupService: CustomerLookupService,
     private val orderLookupService: OrderLookupService,
     private val orderItemPolicy: OrderItemPolicy,
     private val orderStatusTransitionPolicy: OrderStatusTransitionPolicy
 ) {
     fun getOrders(command: FindOrdersCommand): Page<OrderSummaryResult> {
         val pageable = PageRequest.of(command.page, command.size, Sort.by(Sort.Direction.DESC, "createdAt"))
-        val buyerUsername = command.buyerUsername?.takeIf(String::isNotBlank)
+        val customerName = command.customerName?.takeIf(String::isNotBlank)
         val orders = when (command.searchMode) {
-            OrderSearchMode.DERIVED -> findOrdersByDerivedQuery(buyerUsername, command.status, pageable)
-            OrderSearchMode.JPQL -> orderRepository.searchByConditions(buyerUsername, command.status, pageable)
+            OrderSearchMode.DERIVED -> findOrdersByDerivedQuery(customerName, command.status, pageable)
+            OrderSearchMode.JPQL -> orderRepository.searchByConditions(customerName, command.status, pageable)
         }
 
         return orders.map { it.toSummaryResult() }
@@ -50,21 +52,24 @@ class OrderUseCase(
 
     fun getOrderStatusSummaries(command: FindOrderStatusSummariesCommand): List<OrderStatusSummaryResult> =
         orderRepository.findStatusSummaries(
-            buyerUsername = command.buyerUsername?.takeIf(String::isNotBlank),
+            customerName = command.customerName?.takeIf(String::isNotBlank),
             status = command.status
         )
             .map { it.toResult() }
 
     @Transactional
     fun createOrder(command: CreateOrderCommand): OrderResult {
-        val buyer = userLookupService.requireByUsername(command.buyerUsername)
+        val customer = customerLookupService.requireById(command.customerId)
 
         val drafts: List<OrderLineDraft> = command.toDrafts()
         orderItemPolicy.validate(drafts)
 
         return Order(
-            buyer = buyer,
-            shippingAddress = command.toShippingAddress()
+            customer = customer,
+            orderNo = generateOrderNo(),
+            shippingAddress = command.toShippingAddress(),
+            orderedAt = LocalDateTime.now(),
+            deliveryRequestedAt = command.deliveryRequestedAt
         )
             .apply { replaceLines(drafts) }
             .let(orderRepository::save)
@@ -99,16 +104,16 @@ class OrderUseCase(
             .toResult()
 
     private fun findOrdersByDerivedQuery(
-        buyerUsername: String?,
+        customerName: String?,
         status: OrderStatus?,
         pageable: PageRequest
     ): Page<Order> =
         when {
-            buyerUsername != null && status != null ->
-                orderRepository.findAllByBuyerUsernameAndStatusAndDeletedAtIsNull(buyerUsername, status, pageable)
+            customerName != null && status != null ->
+                orderRepository.findAllByCustomerNameAndStatusAndDeletedAtIsNull(customerName, status, pageable)
 
-            buyerUsername != null ->
-                orderRepository.findAllByBuyerUsernameAndDeletedAtIsNull(buyerUsername, pageable)
+            customerName != null ->
+                orderRepository.findAllByCustomerNameAndDeletedAtIsNull(customerName, pageable)
 
             status != null ->
                 orderRepository.findAllByDeletedAtIsNullAndStatus(status, pageable)
@@ -116,4 +121,7 @@ class OrderUseCase(
             else ->
                 orderRepository.findAllByDeletedAtIsNull(pageable)
         }
+
+    private fun generateOrderNo(): String =
+        "ORD-${LocalDateTime.now().year}-${UUID.randomUUID().toString().take(8).uppercase()}"
 }

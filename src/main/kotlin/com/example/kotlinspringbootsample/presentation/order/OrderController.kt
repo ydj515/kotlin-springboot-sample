@@ -58,7 +58,7 @@ class OrderController(
 ) {
     @Operation(
         summary = "주문 상태 요약 조회",
-        description = "주문 상태별 개수를 projection 기반으로 조회합니다. buyerUsername, status 조건으로 집계 범위를 줄일 수 있습니다."
+        description = "주문 상태별 개수를 projection 기반으로 조회합니다. customerName, status 조건으로 집계 범위를 줄일 수 있습니다."
     )
     @ApiResponses(
         value = [
@@ -74,8 +74,8 @@ class OrderController(
     )
     @GetMapping("/status-summary")
     fun getOrderStatusSummaries(
-        @Parameter(description = "구매자 username 필터", example = "alice")
-        @RequestParam(required = false) buyerUsername: String?,
+        @Parameter(description = "고객 이름 필터", example = "한수진")
+        @RequestParam(required = false) customerName: String?,
         @Parameter(
             description = "특정 주문 상태만 집계",
             example = "PAID",
@@ -86,7 +86,7 @@ class OrderController(
         ApiResult.success(
             orderUseCase.getOrderStatusSummaries(
                 FindOrderStatusSummariesCommand(
-                    buyerUsername = buyerUsername,
+                    customerName = customerName,
                     status = status
                 )
             )
@@ -95,7 +95,7 @@ class OrderController(
 
     @Operation(
         summary = "주문 목록 조회",
-        description = "buyerUsername, status 조건으로 주문을 조회합니다. searchMode=DERIVED는 파생 쿼리, searchMode=JPQL은 nullable 조건 JPQL을 사용합니다."
+        description = "customerName, status 조건으로 주문을 조회합니다. searchMode=DERIVED는 파생 쿼리, searchMode=JPQL은 nullable 조건 JPQL을 사용합니다."
     )
     @ApiResponses(
         value = [
@@ -115,8 +115,8 @@ class OrderController(
         @RequestParam(defaultValue = "0") page: Int,
         @Parameter(description = "페이지 크기", example = "10")
         @RequestParam(defaultValue = "10") size: Int,
-        @Parameter(description = "구매자 username 필터", example = "alice")
-        @RequestParam(required = false) buyerUsername: String?,
+        @Parameter(description = "고객 이름 필터", example = "한수진")
+        @RequestParam(required = false) customerName: String?,
         @Parameter(
             description = "주문 상태 필터",
             example = "PAID",
@@ -135,14 +135,14 @@ class OrderController(
                 FindOrdersCommand(
                     page = page,
                     size = size,
-                    buyerUsername = buyerUsername,
+                    customerName = customerName,
                     status = status,
                     searchMode = searchMode
                 )
             ).map(OrderSummaryResult::toResponse)
         )
 
-    @Operation(summary = "주문 단건 조회", description = "상세 조회는 EntityGraph 기반으로 buyer와 orderLines를 함께 로드합니다.")
+    @Operation(summary = "주문 단건 조회", description = "상세 조회는 EntityGraph 기반으로 customer와 orderLines를 함께 로드합니다.")
     @ApiResponses(
         value = [
             ApiResponse(
@@ -252,11 +252,12 @@ class OrderController(
 
 private fun CreateOrderRequest.toCommand(): CreateOrderCommand =
     CreateOrderCommand(
-        buyerUsername = buyerUsername,
+        customerId = customerId,
         recipient = shippingAddress.recipient,
         zipCode = shippingAddress.zipCode,
         address1 = shippingAddress.address1,
         address2 = shippingAddress.address2,
+        deliveryRequestedAt = deliveryRequestedAt,
         items = items.map {
             CreateOrderItemCommand(
                 productName = it.productName,
@@ -270,9 +271,12 @@ private fun OrderSummaryResult.toResponse(): OrderSummaryResponse =
     OrderSummaryResponse(
         id = id,
         version = version,
-        buyerUsername = buyerUsername,
+        orderNo = orderNo,
+        customerId = customerId,
+        customerName = customerName,
         status = status,
         totalAmount = totalAmount,
+        orderedAt = orderedAt,
         paidAt = paidAt,
         shippedAt = shippedAt,
         cancelledAt = cancelledAt,
@@ -283,7 +287,9 @@ private fun OrderResult.toResponse(): OrderResponse =
     OrderResponse(
         id = id,
         version = version,
-        buyerUsername = buyerUsername,
+        orderNo = orderNo,
+        customerId = customerId,
+        customerName = customerName,
         status = status,
         recipient = recipient,
         zipCode = zipCode,
@@ -291,9 +297,13 @@ private fun OrderResult.toResponse(): OrderResponse =
         address2 = address2,
         totalAmount = totalAmount,
         items = items.map(OrderLineResult::toResponse),
+        orderedAt = orderedAt,
+        deliveryRequestedAt = deliveryRequestedAt,
         paidAt = paidAt,
         shippedAt = shippedAt,
         cancelledAt = cancelledAt,
+        trackingNumber = trackingNumber,
+        cancelReason = cancelReason,
         createdAt = createdAt
     )
 

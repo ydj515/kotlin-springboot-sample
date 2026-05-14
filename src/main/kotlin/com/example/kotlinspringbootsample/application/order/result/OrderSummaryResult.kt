@@ -7,9 +7,12 @@ import java.time.LocalDateTime
 data class OrderSummaryResult(
     val id: Long,
     val version: Long,
-    val buyerUsername: String,
+    val orderNo: String,
+    val customerId: Long,
+    val customerName: String,
     val status: OrderStatus,
     val totalAmount: BigDecimal,
+    val orderedAt: LocalDateTime,
     val paidAt: LocalDateTime?,
     val shippedAt: LocalDateTime?,
     val cancelledAt: LocalDateTime?,

@@ -31,9 +31,12 @@ internal fun Order.toSummaryResult(): OrderSummaryResult =
     OrderSummaryResult(
         id = requireNotNull(id),
         version = version ?: 0L,
-        buyerUsername = buyer.username,
+        orderNo = orderNo,
+        customerId = requireNotNull(customer.id),
+        customerName = customer.name,
         status = status,
         totalAmount = totalAmount,
+        orderedAt = orderedAt,
         paidAt = paidAt,
         shippedAt = shippedAt,
         cancelledAt = cancelledAt,
@@ -44,7 +47,9 @@ internal fun Order.toResult(): OrderResult =
     OrderResult(
         id = requireNotNull(id),
         version = version ?: 0L,
-        buyerUsername = buyer.username,
+        orderNo = orderNo,
+        customerId = requireNotNull(customer.id),
+        customerName = customer.name,
         status = status,
         recipient = shippingAddress.recipient,
         zipCode = shippingAddress.zipCode,
@@ -56,12 +61,16 @@ internal fun Order.toResult(): OrderResult =
                 productName = line.productName,
                 quantity = line.quantity,
                 unitPrice = line.unitPrice,
-                lineAmount = line.totalPrice()
+                lineAmount = line.lineAmount
             )
         },
+        orderedAt = orderedAt,
+        deliveryRequestedAt = deliveryRequestedAt,
         paidAt = paidAt,
         shippedAt = shippedAt,
         cancelledAt = cancelledAt,
+        trackingNumber = trackingNumber,
+        cancelReason = cancelReason,
         createdAt = createdAt
     )
 
