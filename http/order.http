@@ -4,7 +4,7 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 ### 주문 상태 요약 조회 (조건 필터)
-GET {{host}}/api/orders/status-summary?buyerUsername=alice&status=PAID
+GET {{host}}/api/orders/status-summary?buyerUsername=user123&status=PAID
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
@@ -14,7 +14,7 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 ### 주문 목록 조회 (JPQL 모드 + 조건 필터)
-GET {{host}}/api/orders?page=0&size=10&buyerUsername=alice&status=PAID&searchMode=JPQL
+GET {{host}}/api/orders?page=0&size=10&buyerUsername=user123&status=PAID&searchMode=JPQL
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
@@ -29,23 +29,23 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "buyerUsername": "alice",
+  "buyerUsername": "user123",
   "shippingAddress": {
-    "recipient": "홍길동",
+    "recipient": "한수진",
     "zipCode": "06236",
-    "address1": "서울특별시 강남구 테헤란로 1",
-    "address2": "10층"
+    "address1": "Seoul Gangnam-daero 123",
+    "address2": "10F"
   },
   "items": [
     {
-      "productName": "USB Hub",
+      "productName": "Mechanical Keyboard",
       "quantity": 1,
-      "unitPrice": 29000
+      "unitPrice": 129000.00
     },
     {
-      "productName": "Laptop Stand",
+      "productName": "Wrist Rest",
       "quantity": 1,
-      "unitPrice": 49000
+      "unitPrice": 40000.00
     }
   ]
 }

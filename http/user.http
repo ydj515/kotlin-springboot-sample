@@ -1,12 +1,16 @@
+### 변수 설정
+@id = 1
+@username = user123
+
 ### 회원가입 (POST는 permitAll)
 POST {{host}}/api/users
 Content-Type: application/json
 
 {
-  "username": "user1",
-  "password": "password1",
-  "name": "User One",
-  "email": "user1@example.com",
+  "username": "new-user",
+  "password": "secret123",
+  "name": "New User",
+  "email": "new.user@example.com",
   "userType": "USER",
   "trialCount": 0
 }
@@ -17,12 +21,12 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 ### 사용자 단건 조회
-GET {{host}}/api/users/1
+GET {{host}}/api/users/{{id}}
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 ### username으로 사용자 조회
-GET {{host}}/api/users/detail?username=user1
+GET {{host}}/api/users/detail?username={{username}}
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
@@ -33,15 +37,15 @@ Content-Type: application/json
 
 {
   "id": 1,
-  "username": "user1",
-  "password": "newpassword1",
-  "name": "User One Updated",
-  "email": "user1.updated@example.com",
-  "userType": "MANAGER",
+  "username": "user123",
+  "password": "password123",
+  "name": "John Doe Updated",
+  "email": "john.updated@example.com",
+  "userType": "USER",
   "trialCount": 1
 }
 
 ### 사용자 삭제
-DELETE {{host}}/api/users/1
+DELETE {{host}}/api/users/{{id}}
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
