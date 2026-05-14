@@ -4,6 +4,7 @@ import com.example.kotlinspringbootsample.infrastructure.security.JwtAuthenticat
 import com.example.kotlinspringbootsample.infrastructure.security.JwtTokenProvider
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.http.HttpMethod
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
@@ -20,7 +21,6 @@ class SecurityConfig(
         val PERMITTED_LIST = arrayOf(
             "/",
             "/api/auth/login",
-            "/api/users",
             "/swagger-ui/**",
             "/swagger-ui",
             "/swagger/**",
@@ -43,6 +43,7 @@ class SecurityConfig(
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .authorizeHttpRequests {
                 it
+                    .requestMatchers(HttpMethod.POST, "/api/users").permitAll()
                     .requestMatchers(*PERMITTED_LIST).permitAll()
                     .anyRequest().authenticated()
             }
