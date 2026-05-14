@@ -4,7 +4,7 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 ### 주문 상태 요약 조회 (조건 필터)
-GET {{host}}/api/orders/status-summary?buyerUsername=user123&status=PAID
+GET {{host}}/api/orders/status-summary?customerName=한수진&status=PAID
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
@@ -14,7 +14,7 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 ### 주문 목록 조회 (JPQL 모드 + 조건 필터)
-GET {{host}}/api/orders?page=0&size=10&buyerUsername=user123&status=PAID&searchMode=JPQL
+GET {{host}}/api/orders?page=0&size=10&customerName=한수진&status=PAID&searchMode=JPQL
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
@@ -29,13 +29,14 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "buyerUsername": "user123",
+  "customerId": 1,
   "shippingAddress": {
     "recipient": "한수진",
     "zipCode": "06236",
     "address1": "Seoul Gangnam-daero 123",
     "address2": "10F"
   },
+  "deliveryRequestedAt": "2024-07-10T18:00:00",
   "items": [
     {
       "productName": "Mechanical Keyboard",
@@ -56,11 +57,11 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 ### 배송 상태 전이
-POST {{host}}/api/orders/1/ship
+POST {{host}}/api/orders/2/ship
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 ### 취소 상태 전이
-POST {{host}}/api/orders/2/cancel
+POST {{host}}/api/orders/4/cancel
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
