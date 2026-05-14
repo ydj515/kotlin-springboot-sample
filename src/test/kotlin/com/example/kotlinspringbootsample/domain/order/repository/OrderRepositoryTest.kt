@@ -1,11 +1,11 @@
 package com.example.kotlinspringbootsample.domain.order.repository
 
+import com.example.kotlinspringbootsample.domain.customer.Customer
+import com.example.kotlinspringbootsample.domain.customer.repository.CustomerRepository
 import com.example.kotlinspringbootsample.domain.order.Order
 import com.example.kotlinspringbootsample.domain.order.OrderLineDraft
 import com.example.kotlinspringbootsample.domain.order.OrderStatus
 import com.example.kotlinspringbootsample.domain.order.ShippingAddress
-import com.example.kotlinspringbootsample.domain.user.User
-import com.example.kotlinspringbootsample.domain.user.repository.UserRepository
 import io.kotest.core.spec.style.DescribeSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -21,25 +21,23 @@ import java.time.LocalDateTime
 @DataJpaTest
 class OrderRepositoryTest(
     @Autowired private val orderRepository: OrderRepository,
-    @Autowired private val userRepository: UserRepository,
+    @Autowired private val customerRepository: CustomerRepository,
     @Autowired private val entityManager: EntityManager,
     @Autowired private val entityManagerFactory: EntityManagerFactory
 ) : DescribeSpec({
 
-    lateinit var buyer: User
+    lateinit var customer: Customer
     lateinit var createdOrder: Order
 
     beforeEach {
-        buyer = userRepository.save(
-            User(
-                username = "order-user",
-                password = "encoded-password"
-            )
+        customer = customerRepository.save(
+            Customer(name = "order-customer", email = "order-customer@example.com")
         )
 
         createdOrder = orderRepository.save(
             Order(
-                buyer = buyer,
+                customer = customer,
+                orderNo = "ORD-TEST-001",
                 shippingAddress = ShippingAddress(
                     recipient = "Order User",
                     zipCode = "06236",
@@ -58,7 +56,8 @@ class OrderRepositoryTest(
 
         orderRepository.save(
             Order(
-                buyer = buyer,
+                customer = customer,
+                orderNo = "ORD-TEST-002",
                 shippingAddress = ShippingAddress(
                     recipient = "Paid User",
                     zipCode = "04147",
@@ -77,14 +76,14 @@ class OrderRepositoryTest(
     }
 
     describe("OrderRepository") {
-        it("buyerUsername 파생 쿼리로 주문 목록을 조회할 수 있다") {
-            val result = orderRepository.findAllByBuyerUsernameAndDeletedAtIsNull(
-                "order-user",
+        it("customerName 파생 쿼리로 주문 목록을 조회할 수 있다") {
+            val result = orderRepository.findAllByCustomerNameAndDeletedAtIsNull(
+                "order-customer",
                 PageRequest.of(0, 10)
             )
 
             result.totalElements shouldBe 2
-            result.content.first().buyer.username shouldBe "order-user"
+            result.content.first().customer.name shouldBe "order-customer"
             result.content.first().totalAmount shouldBe BigDecimal("109000.00")
         }
 
@@ -101,48 +100,48 @@ class OrderRepositoryTest(
             result.content.first().paidAt shouldBe LocalDateTime.of(2026, 5, 8, 9, 0)
         }
 
-        it("상세 조회에서 buyer와 orderLines를 함께 로드한다") {
+        it("상세 조회에서 customer와 orderLines를 함께 로드한다") {
             entityManager.clear()
 
             val result = orderRepository.findByIdAndDeletedAtIsNull(requireNotNull(createdOrder.id))
 
             result.shouldNotBeNull()
             result.lines.size shouldBe 2
-            result.buyer.username shouldBe "order-user"
+            result.customer.name shouldBe "order-customer"
 
             val persistenceUnitUtil = entityManagerFactory.persistenceUnitUtil
-            persistenceUnitUtil.isLoaded(result, "buyer") shouldBe true
+            persistenceUnitUtil.isLoaded(result, "customer") shouldBe true
             persistenceUnitUtil.isLoaded(result, "orderLines") shouldBe true
         }
 
-        it("fetch join 상세 조회도 buyer와 orderLines를 함께 로드할 수 있다") {
+        it("fetch join 상세 조회도 customer와 orderLines를 함께 로드할 수 있다") {
             entityManager.clear()
 
             val result = orderRepository.findDetailByIdUsingFetchJoin(requireNotNull(createdOrder.id))
 
             result.shouldNotBeNull()
             result.lines.size shouldBe 2
-            result.buyer.username shouldBe "order-user"
+            result.customer.name shouldBe "order-customer"
 
             val persistenceUnitUtil = entityManagerFactory.persistenceUnitUtil
-            persistenceUnitUtil.isLoaded(result, "buyer") shouldBe true
+            persistenceUnitUtil.isLoaded(result, "customer") shouldBe true
             persistenceUnitUtil.isLoaded(result, "orderLines") shouldBe true
         }
 
         it("JPQL 기본 조회와 EntityGraph 조회의 연관 로딩 차이를 확인할 수 있다") {
             entityManager.clear()
 
-            val plainResult = orderRepository.findPageWithoutBuyer(PageRequest.of(0, 10))
+            val plainResult = orderRepository.findPageWithoutCustomer(PageRequest.of(0, 10))
             plainResult.content shouldHaveSize 2
 
             val persistenceUnitUtil = entityManagerFactory.persistenceUnitUtil
-            persistenceUnitUtil.isLoaded(plainResult.content.first(), "buyer") shouldBe false
+            persistenceUnitUtil.isLoaded(plainResult.content.first(), "customer") shouldBe false
 
             entityManager.clear()
 
             val entityGraphResult = orderRepository.findAllByDeletedAtIsNull(PageRequest.of(0, 10))
             entityGraphResult.content shouldHaveSize 2
-            persistenceUnitUtil.isLoaded(entityGraphResult.content.first(), "buyer") shouldBe true
+            persistenceUnitUtil.isLoaded(entityGraphResult.content.first(), "customer") shouldBe true
         }
 
         it("EntityGraph와 fetch join은 상세 조회에서 같은 연관 로딩 결과를 만들 수 있다") {
@@ -154,7 +153,7 @@ class OrderRepositoryTest(
 
             entityGraphResult.shouldNotBeNull()
             fetchJoinResult.shouldNotBeNull()
-            entityGraphResult.buyer.username shouldBe fetchJoinResult.buyer.username
+            entityGraphResult.customer.name shouldBe fetchJoinResult.customer.name
             entityGraphResult.lines.size shouldBe fetchJoinResult.lines.size
             entityGraphResult.totalAmount shouldBe fetchJoinResult.totalAmount
         }
@@ -169,22 +168,22 @@ class OrderRepositoryTest(
             countByStatus[OrderStatus.PAID] shouldBe 1
         }
 
-        it("projection 기반 JPQL 집계에 buyerUsername, status 조건을 함께 적용할 수 있다") {
+        it("projection 기반 JPQL 집계에 customerName, status 조건을 함께 적용할 수 있다") {
             entityManager.clear()
 
-            val result = orderRepository.findStatusSummaries("order-user", OrderStatus.PAID)
+            val result = orderRepository.findStatusSummaries("order-customer", OrderStatus.PAID)
 
             result shouldHaveSize 1
             result.first().status shouldBe OrderStatus.PAID
             result.first().count shouldBe 1
         }
 
-        it("동일한 buyerUsername, status 조건을 파생 쿼리와 JPQL 조건식으로 같은 결과를 조회할 수 있다") {
+        it("동일한 customerName, status 조건을 파생 쿼리와 JPQL 조건식으로 같은 결과를 조회할 수 있다") {
             entityManager.clear()
 
             val pageable = PageRequest.of(0, 10)
-            val derivedResult = orderRepository.findAllByBuyerUsernameAndStatusAndDeletedAtIsNull(
-                "order-user",
+            val derivedResult = orderRepository.findAllByCustomerNameAndStatusAndDeletedAtIsNull(
+                "order-customer",
                 OrderStatus.PAID,
                 pageable
             )
@@ -192,7 +191,7 @@ class OrderRepositoryTest(
             entityManager.clear()
 
             val jpqlResult = orderRepository.searchByConditions(
-                "order-user",
+                "order-customer",
                 OrderStatus.PAID,
                 pageable
             )
@@ -202,12 +201,12 @@ class OrderRepositoryTest(
             derivedResult.content.first().status shouldBe jpqlResult.content.first().status
 
             val persistenceUnitUtil = entityManagerFactory.persistenceUnitUtil
-            persistenceUnitUtil.isLoaded(jpqlResult.content.first(), "buyer") shouldBe true
+            persistenceUnitUtil.isLoaded(jpqlResult.content.first(), "customer") shouldBe true
         }
     }
 
     afterEach {
         orderRepository.deleteAll()
-        userRepository.deleteAll()
+        customerRepository.deleteAll()
     }
 })

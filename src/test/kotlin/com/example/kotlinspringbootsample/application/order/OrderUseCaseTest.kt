@@ -1,11 +1,13 @@
 package com.example.kotlinspringbootsample.application.order
 
 import com.example.kotlinspringbootsample.application.order.command.CancelOrderCommand
-import com.example.kotlinspringbootsample.application.order.command.PayOrderCommand
 import com.example.kotlinspringbootsample.application.order.command.FindOrdersCommand
 import com.example.kotlinspringbootsample.application.order.command.FindOrderStatusSummariesCommand
 import com.example.kotlinspringbootsample.application.order.command.OrderSearchMode
+import com.example.kotlinspringbootsample.application.order.command.PayOrderCommand
 import com.example.kotlinspringbootsample.application.order.command.ShipOrderCommand
+import com.example.kotlinspringbootsample.domain.customer.Customer
+import com.example.kotlinspringbootsample.domain.customer.service.CustomerLookupService
 import com.example.kotlinspringbootsample.domain.order.Order
 import com.example.kotlinspringbootsample.domain.order.OrderStatus
 import com.example.kotlinspringbootsample.domain.order.ShippingAddress
@@ -15,8 +17,6 @@ import com.example.kotlinspringbootsample.domain.order.policy.OrderStatusTransit
 import com.example.kotlinspringbootsample.domain.order.repository.OrderRepository
 import com.example.kotlinspringbootsample.domain.order.repository.projection.OrderStatusSummaryProjection
 import com.example.kotlinspringbootsample.domain.order.service.OrderLookupService
-import com.example.kotlinspringbootsample.domain.user.User
-import com.example.kotlinspringbootsample.domain.user.service.UserLookupService
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.collections.shouldHaveSize
@@ -34,18 +34,18 @@ import java.time.LocalDateTime
 class OrderUseCaseTest : BehaviorSpec({
 
     val orderRepository = mockk<OrderRepository>()
-    val userLookupService = mockk<UserLookupService>()
+    val customerLookupService = mockk<CustomerLookupService>()
     val orderLookupService = mockk<OrderLookupService>()
     val orderUseCase = OrderUseCase(
         orderRepository = orderRepository,
-        userLookupService = userLookupService,
+        customerLookupService = customerLookupService,
         orderLookupService = orderLookupService,
         orderItemPolicy = OrderItemPolicy(),
         orderStatusTransitionPolicy = OrderStatusTransitionPolicy()
     )
 
     beforeTest {
-        clearMocks(orderRepository, userLookupService, orderLookupService)
+        clearMocks(orderRepository, customerLookupService, orderLookupService)
     }
 
     Given("주문 결제 요청이 들어오면") {
@@ -149,46 +149,46 @@ class OrderUseCaseTest : BehaviorSpec({
             }
         }
 
-        When("searchMode가 JPQL이고 buyerUsername, status 조건이 함께 있으면") {
+        When("searchMode가 JPQL이고 customerName, status 조건이 함께 있으면") {
             Then("nullable 조건식 기반 JPQL 조회를 사용한다") {
                 val pageable = PageRequest.of(0, 10, Sort.by(Sort.Direction.DESC, "createdAt"))
-                val order = sampleOrder(id = 11L).apply {
+                val order = sampleOrder(id = 11L, customerName = "한수진").apply {
                     markPaid(LocalDateTime.of(2026, 5, 8, 9, 30))
                 }
 
                 every {
-                    orderRepository.searchByConditions("buyer", OrderStatus.PAID, pageable)
+                    orderRepository.searchByConditions("한수진", OrderStatus.PAID, pageable)
                 } returns PageImpl(listOf(order), pageable, 1)
 
                 val result = orderUseCase.getOrders(
                     FindOrdersCommand(
                         page = 0,
                         size = 10,
-                        buyerUsername = "buyer",
+                        customerName = "한수진",
                         status = OrderStatus.PAID,
                         searchMode = OrderSearchMode.JPQL
                     )
                 )
 
                 result.content shouldHaveSize 1
-                result.content.first().buyerUsername shouldBe "buyer"
+                result.content.first().customerName shouldBe "한수진"
                 verify(exactly = 1) {
-                    orderRepository.searchByConditions("buyer", OrderStatus.PAID, pageable)
+                    orderRepository.searchByConditions("한수진", OrderStatus.PAID, pageable)
                 }
             }
         }
     }
 
     Given("주문 상태 요약을 조회하면") {
-        When("buyerUsername, status 조건이 함께 있으면") {
+        When("customerName, status 조건이 함께 있으면") {
             Then("필터가 적용된 projection 결과를 application result로 변환한다") {
-                every { orderRepository.findStatusSummaries("buyer", OrderStatus.PAID) } returns listOf(
+                every { orderRepository.findStatusSummaries("한수진", OrderStatus.PAID) } returns listOf(
                     statusSummaryProjection(OrderStatus.PAID, 1)
                 )
 
                 val result = orderUseCase.getOrderStatusSummaries(
                     FindOrderStatusSummariesCommand(
-                        buyerUsername = "buyer",
+                        customerName = "한수진",
                         status = OrderStatus.PAID
                     )
                 )
@@ -196,18 +196,19 @@ class OrderUseCaseTest : BehaviorSpec({
                 result shouldHaveSize 1
                 result[0].status shouldBe OrderStatus.PAID
                 result[0].count shouldBe 1
-                verify(exactly = 1) { orderRepository.findStatusSummaries("buyer", OrderStatus.PAID) }
+                verify(exactly = 1) { orderRepository.findStatusSummaries("한수진", OrderStatus.PAID) }
             }
         }
     }
 })
 
-private fun sampleOrder(id: Long): Order =
+private fun sampleOrder(id: Long, customerName: String = "한수진"): Order =
     Order(
         id = id,
-        buyer = User(username = "buyer", password = "encoded-password"),
+        customer = Customer(id = 1L, name = customerName, email = "$customerName@example.com"),
+        orderNo = "ORD-2024-$id",
         shippingAddress = ShippingAddress(
-            recipient = "Buyer Kim",
+            recipient = customerName,
             zipCode = "06236",
             address1 = "Seoul Gangnam-daero 1",
             address2 = "101-ho"

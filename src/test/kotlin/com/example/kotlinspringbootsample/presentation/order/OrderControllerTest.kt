@@ -45,15 +45,16 @@ class OrderControllerTest(
     @MockkBean private val jwtTokenProvider: JwtTokenProvider
 ) : DescribeSpec({
 
+    val orderedAt = LocalDateTime.of(2026, 5, 8, 11, 0)
     val paidAt = LocalDateTime.of(2026, 5, 8, 12, 5)
     val shippedAt = LocalDateTime.of(2026, 5, 8, 13, 0)
 
     describe("GET /api/orders/status-summary") {
-        it("buyerUsername, status 파라미터를 받아 projection 기반 상태 요약을 반환한다") {
+        it("customerName, status 파라미터를 받아 projection 기반 상태 요약을 반환한다") {
             every {
                 orderUseCase.getOrderStatusSummaries(
                     FindOrderStatusSummariesCommand(
-                        buyerUsername = "buyer",
+                        customerName = "한수진",
                         status = OrderStatus.PAID
                     )
                 )
@@ -62,7 +63,7 @@ class OrderControllerTest(
             )
 
             mockMvc.get("/api/orders/status-summary") {
-                param("buyerUsername", "buyer")
+                param("customerName", "한수진")
                 param("status", "PAID")
             }
                 .andExpect {
@@ -75,7 +76,7 @@ class OrderControllerTest(
             verify {
                 orderUseCase.getOrderStatusSummaries(
                     FindOrderStatusSummariesCommand(
-                        buyerUsername = "buyer",
+                        customerName = "한수진",
                         status = OrderStatus.PAID
                     )
                 )
@@ -102,7 +103,7 @@ class OrderControllerTest(
                     FindOrdersCommand(
                         page = 0,
                         size = 10,
-                        buyerUsername = "buyer",
+                        customerName = "한수진",
                         status = OrderStatus.PAID,
                         searchMode = OrderSearchMode.JPQL
                     )
@@ -112,13 +113,16 @@ class OrderControllerTest(
                     OrderSummaryResult(
                         id = 1L,
                         version = 2L,
-                        buyerUsername = "buyer",
+                        orderNo = "ORD-2024-0001",
+                        customerId = 1L,
+                        customerName = "한수진",
                         status = OrderStatus.PAID,
                         totalAmount = BigDecimal("109000.00"),
+                        orderedAt = orderedAt,
                         paidAt = paidAt,
                         shippedAt = null,
                         cancelledAt = null,
-                        createdAt = LocalDateTime.of(2026, 5, 8, 11, 0)
+                        createdAt = orderedAt
                     )
                 ),
                 PageRequest.of(0, 10),
@@ -126,7 +130,7 @@ class OrderControllerTest(
             )
 
             mockMvc.get("/api/orders") {
-                param("buyerUsername", "buyer")
+                param("customerName", "한수진")
                 param("status", "PAID")
                 param("searchMode", "JPQL")
             }.andExpect {
@@ -134,6 +138,8 @@ class OrderControllerTest(
                 jsonPath("$.result") { value("success") }
                 jsonPath("$.data.content[0].status") { value("PAID") }
                 jsonPath("$.data.content[0].version") { value(2) }
+                jsonPath("$.data.content[0].orderNo") { value("ORD-2024-0001") }
+                jsonPath("$.data.content[0].customerName") { value("한수진") }
                 jsonPath("$.data.content[0].paidAt") { value("2026-05-08T12:05:00") }
             }
 
@@ -142,7 +148,7 @@ class OrderControllerTest(
                     FindOrdersCommand(
                         page = 0,
                         size = 10,
-                        buyerUsername = "buyer",
+                        customerName = "한수진",
                         status = OrderStatus.PAID,
                         searchMode = OrderSearchMode.JPQL
                     )
@@ -157,6 +163,7 @@ class OrderControllerTest(
                 id = 1L,
                 version = 3L,
                 status = OrderStatus.PAID,
+                orderedAt = orderedAt,
                 paidAt = paidAt
             )
 
@@ -179,6 +186,7 @@ class OrderControllerTest(
                 id = 2L,
                 version = 4L,
                 status = OrderStatus.SHIPPED,
+                orderedAt = orderedAt,
                 paidAt = paidAt,
                 shippedAt = shippedAt
             )
@@ -219,6 +227,7 @@ private fun sampleOrderResult(
     id: Long,
     version: Long,
     status: OrderStatus,
+    orderedAt: LocalDateTime,
     paidAt: LocalDateTime? = null,
     shippedAt: LocalDateTime? = null,
     cancelledAt: LocalDateTime? = null
@@ -226,9 +235,11 @@ private fun sampleOrderResult(
     OrderResult(
         id = id,
         version = version,
-        buyerUsername = "buyer",
+        orderNo = "ORD-2024-$id",
+        customerId = 1L,
+        customerName = "한수진",
         status = status,
-        recipient = "Buyer Kim",
+        recipient = "한수진",
         zipCode = "06236",
         address1 = "Seoul Gangnam-daero 1",
         address2 = "101-ho",
@@ -241,8 +252,12 @@ private fun sampleOrderResult(
                 lineAmount = BigDecimal("64000.00")
             )
         ),
+        orderedAt = orderedAt,
+        deliveryRequestedAt = null,
         paidAt = paidAt,
         shippedAt = shippedAt,
         cancelledAt = cancelledAt,
-        createdAt = LocalDateTime.of(2026, 5, 8, 12, 0)
+        trackingNumber = null,
+        cancelReason = null,
+        createdAt = orderedAt
     )

@@ -1,8 +1,8 @@
 package com.example.kotlinspringbootsample.domain.order
 
+import com.example.kotlinspringbootsample.domain.customer.Customer
+import com.example.kotlinspringbootsample.domain.customer.repository.CustomerRepository
 import com.example.kotlinspringbootsample.domain.order.repository.OrderRepository
-import com.example.kotlinspringbootsample.domain.user.User
-import com.example.kotlinspringbootsample.domain.user.repository.UserRepository
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
@@ -21,19 +21,19 @@ import java.time.LocalDateTime
 @ActiveProfiles("test")
 class OrderOptimisticLockingIntegrationTest @Autowired constructor(
     private val orderRepository: OrderRepository,
-    private val userRepository: UserRepository,
+    private val customerRepository: CustomerRepository,
     transactionManager: PlatformTransactionManager
 ) {
     private val transactionTemplate = TransactionTemplate(transactionManager)
     private val createdOrderIds = mutableListOf<Long>()
-    private val createdUserIds = mutableListOf<Long>()
+    private val createdCustomerIds = mutableListOf<Long>()
 
     @AfterEach
     fun cleanup() {
         createdOrderIds.forEach(orderRepository::deleteById)
-        createdUserIds.forEach(userRepository::deleteById)
+        createdCustomerIds.forEach(customerRepository::deleteById)
         createdOrderIds.clear()
-        createdUserIds.clear()
+        createdCustomerIds.clear()
     }
 
     @Test
@@ -73,17 +73,15 @@ class OrderOptimisticLockingIntegrationTest @Autowired constructor(
     private fun createOrder(): Long =
         transactionTemplate.execute {
             val suffix = System.nanoTime()
-            val user = userRepository.save(
-                User(
-                    username = "optimistic-$suffix",
-                    password = "encoded-password"
-                )
+            val customer = customerRepository.save(
+                Customer(name = "optimistic-$suffix", email = "optimistic-$suffix@example.com")
             )
-            createdUserIds += requireNotNull(user.id)
+            createdCustomerIds += requireNotNull(customer.id)
 
             orderRepository.saveAndFlush(
                 Order(
-                    buyer = user,
+                    customer = customer,
+                    orderNo = "ORD-OPT-$suffix",
                     shippingAddress = ShippingAddress(
                         recipient = "Optimistic User",
                         zipCode = "06236",
