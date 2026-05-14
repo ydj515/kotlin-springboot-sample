@@ -210,23 +210,131 @@
 | 4 | `OrderPaidEventListener.handle`: ProcessedEvent insert (UNIQUE 충돌 시 abort) → SMS 전송 (별도 트랜잭션 - REQUIRES_NEW) |
 | 5 | `payOrder` 안에서 PG.approve 후 DB 실패 catch → 별도 트랜잭션으로 PG.refund 호출 → 실패 시 CompensationTask insert |
 
+## Payment aggregate 설계 결정 (Level 2 진입 전 확정)
+
+### 1. OrderId 참조 방식 — ID-only reference + DB FK
+
+**채택**: `payments.order_id BIGINT NOT NULL` + DB FK `→ orders(id)`. 도메인 객체는 `Order` 인스턴스를 들지 않고 **`orderId: Long`만 보유**.
+
+**근거**:
+- DDD aggregate 경계 원칙: 다른 aggregate는 ID로만 참조 (Vaughn Vernon)
+- JPA `@ManyToOne Order` 매핑 회피 → Payment aggregate가 Order aggregate를 lazy-loading 통해 종속되는 사고 방지
+- DB FK는 유지 → 단일 DB 환경에서 데이터 무결성 보장 (microservice 분리 시점에 제거 검토)
+
+**구현**:
+- kotlin: `class Payment(val orderId: Long, ...)`, `@Column(name = "order_id") val orderId: Long`. NO `@ManyToOne`.
+- java-mybatis: `private Long orderId;` + Mapper에서 SELECT/INSERT 시 단순 컬럼
+
+**비고**:
+- Order → Payment 역참조도 동일 원칙 (`Order`는 `paymentIds`나 nothing). 학습용으로는 Order가 Payment를 모르는 게 깔끔.
+- Order.status를 PAID로 전이하는 책임은 `OrderUseCase` (Facade)가 담당. Order/Payment 둘 다 변경하는 트랜잭션 안에서.
+
+### 2. Payment.status enum 전이도
+
+**채택 상태**:
+- `REQUESTED`: Payment 객체 생성 + DB insert 직후. PG.approve 호출 전/중.
+- `APPROVED`: PG.approve 성공 → paymentKey, approvedAt 채워짐.
+- `FAILED`: PG.approve 실패. paymentKey null, 재시도하려면 새 Payment.
+- `REFUNDED`: PG.refund 성공 (Level 5에서 도입).
+- `REFUND_FAILED`: PG.refund 실패 (Level 5에서 도입). compensation_tasks에 등록되어 retry worker가 처리.
+
+**전이 매트릭스**:
+
+| From → To | REQUESTED | APPROVED | FAILED | REFUNDED | REFUND_FAILED |
+|---|---|---|---|---|---|
+| (new) | ✓ insert | | | | |
+| REQUESTED | | ✓ PG.approve 성공 | ✓ PG.approve 실패 | | |
+| APPROVED | | | | ✓ PG.refund 성공 (L5) | ✓ PG.refund 실패 (L5) |
+| FAILED | (terminal) | | | | |
+| REFUNDED | (terminal) | | | | |
+| REFUND_FAILED | | | | ✓ retry 성공 (L5) | (재실패 시 자기 자신 유지) |
+
+**금지 전이**: 위에 없는 모든 조합. 도메인 메서드(`markApproved`, `markFailed`, `markRefunded`, `markRefundFailed`)가 호출 시점에 현재 status 검증 후 던짐 → `IllegalPaymentStateTransitionException`.
+
+**구현 메서드 시그니처**:
+- `markApproved(paymentKey: String, approvedAt: LocalDateTime)`: REQUESTED → APPROVED
+- `markFailed(reason: String, occurredAt: LocalDateTime)`: REQUESTED → FAILED
+- `markRefunded(refundedAt: LocalDateTime, reason: String)`: APPROVED 또는 REFUND_FAILED → REFUNDED (Level 5)
+- `markRefundFailed(reason: String, occurredAt: LocalDateTime)`: APPROVED → REFUND_FAILED (Level 5)
+
+### 3. PaymentHistory 저장 트리거 위치 — Payment aggregate 안
+
+**채택**: Payment 도메인 메서드(`markApproved`, `markFailed` 등) 내부에서 in-memory `histories: MutableList<PaymentHistory>`에 PaymentHistory 객체를 추가. Repository.save는 Payment 본체와 누적된 histories를 함께 영속화.
+
+**근거**:
+- 도메인이 자신의 audit을 책임 — DDD 친화적
+- UseCase 코드가 매번 history 호출하는 부담/누락 위험 제거
+- transaction 안에서 atomic 보장
+
+**JPA vs MyBatis 차이**:
+
+| 측면 | kotlin (JPA) | java-mybatis (MyBatis) |
+|---|---|---|
+| in-memory 누적 | `Payment.histories: MutableList<PaymentHistory>` (transient or @OneToMany) | `Payment.histories: List<PaymentHistory>` (transient field, MyBatis는 자동 매핑 안 함) |
+| 영속화 | `@OneToMany(cascade = CascadeType.ALL, orphanRemoval = true)` — Payment.save 시 cascade | `PaymentRepository.save(payment)` 내부 구현에서 paymentMapper.update + 새로 추가된 histories만 paymentHistoryMapper.insertHistory |
+| 기존 history vs 신규 | JPA가 알아서 detect (transient = new) | 신규 추가된 항목만 추적하기 위해 Payment에 `newlyAddedHistories` 같은 transient list 별도 관리 |
+
+**도메인 메서드 예시** (kotlin):
+```kotlin
+fun markApproved(paymentKey: String, approvedAt: LocalDateTime, reason: String = "PG approved") {
+    require(status == PaymentStatus.REQUESTED) {
+        throw IllegalPaymentStateTransitionException(status, PaymentStatus.APPROVED)
+    }
+    val fromStatus = status
+    this.paymentKey = paymentKey
+    this.approvedAt = approvedAt
+    this.status = PaymentStatus.APPROVED
+    histories.add(PaymentHistory.of(this, fromStatus, status, approvedAt, reason))
+}
+```
+
+**대안 (Spring ApplicationEvent + listener)**:
+- 도메인 이벤트로 발행 후 listener가 history 저장
+- 학습용으로는 over-engineering. Level 3~4의 outbox/consumer 패턴과 헷갈리기 쉬움
+- → **채택 안 함**
+
+### 4. payments 테이블 UNIQUE 전략
+
+- `idempotency_key VARCHAR(255) UNIQUE` (전역 unique — Stripe 패턴)
+- 다른 order에서 같은 키 사용 → DB UNIQUE 위반 → `IdempotencyConflictException` (409)
+- 같은 order + 같은 키 → 검색 후 amount 일치 검증 → 일치하면 replay, 다르면 conflict (409)
+
+### 5. 추가 결정
+
+- **amount precision**: `DECIMAL(12, 2)` — orders.total_amount와 일치
+- **version**: 모든 mutable 상태에 대해 optimistic lock (`@Version` / mybatis는 update WHERE version=?)
+- **idempotency_key 길이**: VARCHAR(255), application에서 1~255자 검증
+- **paymentKey 길이**: VARCHAR(100), PG 발급. MockPaymentGateway는 `MOCK-PG-<uuid>` 형태 (총 ~44자)
+
+---
+
 ## 도메인 모델 확장
 
 ### Payment (Level 2~)
 ```
 Payment
-├── id, orderId, idempotencyKey, amount
-├── status: REQUESTED → APPROVED → REFUNDED
-├── paymentKey (PG 발급)
-├── approvedAt, refundedAt
-└── version, createdAt, updatedAt
+├── id (PK, AUTO_INCREMENT)
+├── orderId (FK to orders.id, NOT NULL)
+├── idempotencyKey (VARCHAR(255), UNIQUE GLOBALLY)
+├── amount (DECIMAL(12,2), NOT NULL)
+├── status (VARCHAR(30), NOT NULL) — REQUESTED/APPROVED/FAILED/REFUNDED/REFUND_FAILED
+├── paymentKey (VARCHAR(100), nullable) — PG 발급, REQUESTED 단계엔 null
+├── approvedAt, refundedAt (DATETIME, nullable)
+├── version (BIGINT, optimistic lock)
+└── createdAt, updatedAt (BaseEntity 패턴)
+
+(transient/in-memory)
+└── histories: List<PaymentHistory> — 도메인 메서드가 누적, repository.save 시 함께 flush
 ```
 
 ### PaymentHistory (Level 2~)
 ```
 PaymentHistory
-├── id, paymentId
-├── fromStatus, toStatus, occurredAt, reason
+├── id (PK)
+├── paymentId (FK to payments.id, NOT NULL)
+├── fromStatus, toStatus (VARCHAR(30))
+├── occurredAt (DATETIME, NOT NULL)
+└── reason (VARCHAR(255), nullable) — 예: "PG approved", "PG declined: insufficient balance"
 ```
 
 ### OutboxEvent (Level 3~)

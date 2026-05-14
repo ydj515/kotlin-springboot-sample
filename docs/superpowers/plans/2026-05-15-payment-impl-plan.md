@@ -110,10 +110,12 @@
 ## Level 2: Payment + PaymentHistory + Idempotency
 
 ### Task 2.1: schema migration
-- [ ] kotlin: JPA `ddl-auto=update` 활용 + 별도 SQL 없음. Payment/PaymentHistory entity 추가
-- [ ] java-mybatis: `init_data.sql` + `db/mysql/payment-schema.sql` 추가
-- [ ] 컬럼: payments(id, order_id, idempotency_key UNIQUE, amount, status, payment_key, approved_at, refunded_at, version, created_at, updated_at)
-- [ ] payment_histories(id, payment_id, from_status, to_status, occurred_at, reason)
+- [ ] kotlin: JPA `ddl-auto=create-drop` 그대로 + Payment/PaymentHistory `@Entity` 추가 → 자동 생성
+- [ ] java-mybatis: `init_data.sql`에 추가 + `src/test/resources/db/mysql/payment-schema.sql` 신규 (테스트용)
+- [ ] 컬럼 (spec "Payment aggregate 설계 결정" 참조):
+  - `payments`(id PK, order_id BIGINT NOT NULL FK→orders, idempotency_key VARCHAR(255) UNIQUE, amount DECIMAL(12,2), status VARCHAR(30), payment_key VARCHAR(100) nullable, approved_at DATETIME nullable, refunded_at DATETIME nullable, version BIGINT, created_at, updated_at)
+  - `payment_histories`(id PK, payment_id BIGINT NOT NULL FK→payments, from_status VARCHAR(30), to_status VARCHAR(30) NOT NULL, occurred_at DATETIME NOT NULL, reason VARCHAR(255) nullable)
+- [ ] FK는 단일 DB이므로 유지 (microservice 분리 시점에 재검토)
 
 ### Task 2.2: Payment aggregate (양쪽 동시)
 
@@ -131,13 +133,32 @@
 - Create: `domain/payment/service/PaymentLookupService.java`
 - Create: 예외 클래스들
 
-- [ ] **Step 1: Payment 도메인 클래스 정의** (status 전이 메서드 포함)
+- [ ] **Step 1: Payment 도메인 클래스 정의** (spec 설계 결정 따름)
+  - 필드: `id, orderId: Long (NO @ManyToOne), idempotencyKey, amount, status, paymentKey?, approvedAt?, refundedAt?, version`
+  - 도메인 메서드: `markApproved(paymentKey, approvedAt, reason)`, `markFailed(reason, occurredAt)` (Level 5: `markRefunded`, `markRefundFailed`)
+  - 상태 전이 검증 내장 (REQUESTED→APPROVED/FAILED만 허용)
+  - `histories: MutableList<PaymentHistory>` in-memory 누적
 - [ ] **Step 2: PaymentHistory 도메인 클래스 정의**
-- [ ] **Step 3: Repository port 정의 (양쪽 동일 시그니처)**
-  - `save(Payment)`, `findById`, `findByOrderId`, `findByIdempotencyKey`
-  - `saveHistory(PaymentHistory)`
-- [ ] **Step 4: java-mybatis Mapper + xml 작성**
-- [ ] **Step 5: PaymentLookupService 추가**
+  - 필드: `id, paymentId, fromStatus, toStatus, occurredAt, reason?`
+  - factory: `PaymentHistory.of(payment, from, to, occurredAt, reason)` — paymentId 자동 추출
+- [ ] **Step 3: PaymentStatus enum 정의**
+  - `REQUESTED, APPROVED, FAILED, REFUNDED, REFUND_FAILED`
+  - 전이 매트릭스는 도메인 메서드가 직접 검증 (별도 policy 클래스 미도입)
+- [ ] **Step 4: Repository port 정의 (양쪽 동일 시그니처)**
+  - `save(Payment): Payment` — JPA: cascade로 histories 자동 저장 / MyBatis: payment update + 신규 histories만 insert
+  - `findById(id): Payment?`
+  - `findByIdempotencyKey(key): Payment?` — replay 조회 + conflict 검증용
+  - `findByOrderId(orderId): List<Payment>` — 운영/디버깅용 (요건은 아님)
+- [ ] **Step 5: java-mybatis Mapper + xml 작성**
+  - `PaymentMapper.save`: useGeneratedKeys + payment update 분기
+  - `PaymentMapper.findByIdempotencyKey`: WHERE idempotency_key = ?
+  - `PaymentHistoryMapper.insertHistory(history)`: PaymentRepository.save 구현체 안에서 호출
+- [ ] **Step 6: PaymentLookupService 추가** — requireById, requireByIdempotencyKey
+- [ ] **Step 7: 예외 클래스**
+  - `PaymentNotFoundException` (404)
+  - `IdempotencyConflictException` (409)
+  - `IllegalPaymentStateTransitionException` (409, 도메인 메서드가 잘못된 status 전이 시도 시)
+- [ ] **Step 8: PaymentHistory 자동 누적 통합 테스트** — `payment.markApproved(...)` 호출 1회로 history 1건 자동 추가됨 확인
 
 ### Task 2.3: OrderUseCase.payOrder 갱신 — Payment aggregate 사용
 
