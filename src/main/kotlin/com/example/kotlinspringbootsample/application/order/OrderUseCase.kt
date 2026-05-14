@@ -14,12 +14,11 @@ import com.example.kotlinspringbootsample.application.order.result.OrderSummaryR
 import com.example.kotlinspringbootsample.domain.order.Order
 import com.example.kotlinspringbootsample.domain.order.OrderLineDraft
 import com.example.kotlinspringbootsample.domain.order.OrderStatus
-import com.example.kotlinspringbootsample.domain.order.exception.OrderNotFoundException
 import com.example.kotlinspringbootsample.domain.order.policy.OrderItemPolicy
 import com.example.kotlinspringbootsample.domain.order.policy.OrderStatusTransitionPolicy
 import com.example.kotlinspringbootsample.domain.order.repository.OrderRepository
-import com.example.kotlinspringbootsample.domain.user.exception.UserException
-import com.example.kotlinspringbootsample.domain.user.repository.UserRepository
+import com.example.kotlinspringbootsample.domain.order.service.OrderLookupService
+import com.example.kotlinspringbootsample.domain.user.service.UserLookupService
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
@@ -30,7 +29,8 @@ import org.springframework.transaction.annotation.Transactional
 @Transactional(readOnly = true)
 class OrderUseCase(
     private val orderRepository: OrderRepository,
-    private val userRepository: UserRepository,
+    private val userLookupService: UserLookupService,
+    private val orderLookupService: OrderLookupService,
     private val orderItemPolicy: OrderItemPolicy,
     private val orderStatusTransitionPolicy: OrderStatusTransitionPolicy
 ) {
@@ -46,7 +46,7 @@ class OrderUseCase(
     }
 
     fun getOrder(command: GetOrderCommand): OrderResult =
-        findOrder(command.id).toResult()
+        orderLookupService.requireById(command.id).toResult()
 
     fun getOrderStatusSummaries(command: FindOrderStatusSummariesCommand): List<OrderStatusSummaryResult> =
         orderRepository.findStatusSummaries(
@@ -57,8 +57,7 @@ class OrderUseCase(
 
     @Transactional
     fun createOrder(command: CreateOrderCommand): OrderResult {
-        val buyer = userRepository.findByUsername(command.buyerUsername)
-            ?: throw UserException("buyer not found with username ${command.buyerUsername}")
+        val buyer = userLookupService.requireByUsername(command.buyerUsername)
 
         val drafts: List<OrderLineDraft> = command.toDrafts()
         orderItemPolicy.validate(drafts)
@@ -74,7 +73,7 @@ class OrderUseCase(
 
     @Transactional
     fun payOrder(command: PayOrderCommand): OrderResult =
-        findOrder(command.id)
+        orderLookupService.requireById(command.id)
             .apply {
                 orderStatusTransitionPolicy.validatePayable(this)
                 markPaid()
@@ -83,7 +82,7 @@ class OrderUseCase(
 
     @Transactional
     fun shipOrder(command: ShipOrderCommand): OrderResult =
-        findOrder(command.id)
+        orderLookupService.requireById(command.id)
             .apply {
                 orderStatusTransitionPolicy.validateShippable(this)
                 markShipped()
@@ -92,16 +91,12 @@ class OrderUseCase(
 
     @Transactional
     fun cancelOrder(command: CancelOrderCommand): OrderResult =
-        findOrder(command.id)
+        orderLookupService.requireById(command.id)
             .apply {
                 orderStatusTransitionPolicy.validateCancellable(this)
                 cancel()
             }
             .toResult()
-
-    private fun findOrder(id: Long): Order =
-        orderRepository.findByIdAndDeletedAtIsNull(id)
-            ?: throw OrderNotFoundException("Order not found with id $id")
 
     private fun findOrdersByDerivedQuery(
         buyerUsername: String?,
