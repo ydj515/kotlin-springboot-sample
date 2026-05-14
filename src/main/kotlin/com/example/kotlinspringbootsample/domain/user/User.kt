@@ -47,7 +47,7 @@ class User(
     @Column(name = "user_type")
     var userType: UserType? = null,
 
-    @Column(name = "trial_count", nullable = false)
+    @Column(name = "trial_cnt", nullable = false)
     var trialCount: Int = 0,
 
     @ManyToMany(fetch = FetchType.LAZY)

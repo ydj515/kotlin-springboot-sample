@@ -18,6 +18,6 @@ class Role(
     @Column(nullable = false, unique = true)
     var name: String,
 
-    @Column
-    var description: String? = null
+    @Column(nullable = false)
+    var description: String
 ) : BaseEntity()

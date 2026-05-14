@@ -6,7 +6,7 @@ import java.time.LocalDateTime
 data class UserRoleResult(
     val id: Long?,
     val name: String,
-    val description: String?,
+    val description: String,
     val createdAt: LocalDateTime?,
     val updatedAt: LocalDateTime?
 ) {
