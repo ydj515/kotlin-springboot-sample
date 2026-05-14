@@ -17,6 +17,8 @@ import com.example.kotlinspringbootsample.domain.order.policy.OrderStatusTransit
 import com.example.kotlinspringbootsample.domain.order.repository.OrderRepository
 import com.example.kotlinspringbootsample.domain.order.repository.projection.OrderStatusSummaryProjection
 import com.example.kotlinspringbootsample.domain.order.service.OrderLookupService
+import com.example.kotlinspringbootsample.domain.payment.gateway.ApproveResult
+import com.example.kotlinspringbootsample.domain.payment.gateway.PaymentGateway
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.collections.shouldHaveSize
@@ -36,36 +38,43 @@ class OrderUseCaseTest : BehaviorSpec({
     val orderRepository = mockk<OrderRepository>()
     val customerLookupService = mockk<CustomerLookupService>()
     val orderLookupService = mockk<OrderLookupService>()
+    val paymentGateway = mockk<PaymentGateway>()
     val orderUseCase = OrderUseCase(
         orderRepository = orderRepository,
         customerLookupService = customerLookupService,
         orderLookupService = orderLookupService,
         orderItemPolicy = OrderItemPolicy(),
-        orderStatusTransitionPolicy = OrderStatusTransitionPolicy()
+        orderStatusTransitionPolicy = OrderStatusTransitionPolicy(),
+        paymentGateway = paymentGateway
     )
 
     beforeTest {
-        clearMocks(orderRepository, customerLookupService, orderLookupService)
+        clearMocks(orderRepository, customerLookupService, orderLookupService, paymentGateway)
     }
 
     Given("주문 결제 요청이 들어오면") {
         When("주문이 CREATED 상태면") {
-            Then("lookup service로 주문을 보장하고 save 재호출 없이 PAID 상태와 결제 시각을 반영한다") {
+            Then("PG approve 호출 후 PAID 상태와 결제 시각, paymentKey를 반영한다") {
                 val order = sampleOrder(id = 1L)
+                val approvedAt = LocalDateTime.of(2026, 5, 8, 10, 0)
 
                 every { orderLookupService.requireById(1L) } returns order
+                every { paymentGateway.approve(order.totalAmount, any()) } returns
+                    ApproveResult(paymentKey = "MOCK-PG-test-key", approvedAt = approvedAt)
 
                 val result = orderUseCase.payOrder(PayOrderCommand(1L))
 
                 result.status shouldBe OrderStatus.PAID
-                result.paidAt.shouldNotBeNull()
+                result.paidAt shouldBe approvedAt
+                result.paymentKey shouldBe "MOCK-PG-test-key"
                 verify(exactly = 1) { orderLookupService.requireById(1L) }
+                verify(exactly = 1) { paymentGateway.approve(order.totalAmount, any()) }
                 verify(exactly = 0) { orderRepository.save(any()) }
             }
         }
 
         When("이미 결제된 주문이면") {
-            Then("상태 전이 예외를 던진다") {
+            Then("PG approve 호출 없이 상태 전이 예외를 던진다") {
                 val order = sampleOrder(id = 1L).apply {
                     markPaid(LocalDateTime.of(2026, 5, 8, 10, 0))
                 }
@@ -77,6 +86,7 @@ class OrderUseCaseTest : BehaviorSpec({
                 }
 
                 exception.message shouldBe "only created orders can be paid. current status: PAID"
+                verify(exactly = 0) { paymentGateway.approve(any(), any()) }
             }
         }
     }

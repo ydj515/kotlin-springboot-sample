@@ -304,6 +304,7 @@ private fun OrderResult.toResponse(): OrderResponse =
         cancelledAt = cancelledAt,
         trackingNumber = trackingNumber,
         cancelReason = cancelReason,
+        paymentKey = paymentKey,
         createdAt = createdAt
     )
 

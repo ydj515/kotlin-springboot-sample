@@ -24,5 +24,6 @@ data class OrderResult(
     val cancelledAt: LocalDateTime?,
     val trackingNumber: String?,
     val cancelReason: String?,
+    val paymentKey: String? = null,
     val createdAt: LocalDateTime
 )

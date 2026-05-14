@@ -158,13 +158,14 @@ class OrderControllerTest(
     }
 
     describe("POST /api/orders/{id}/pay") {
-        it("결제 성공 시 version과 paidAt을 포함한 주문 응답을 반환한다") {
+        it("결제 성공 시 version, paidAt, paymentKey를 포함한 주문 응답을 반환한다") {
             every { orderUseCase.payOrder(PayOrderCommand(1L)) } returns sampleOrderResult(
                 id = 1L,
                 version = 3L,
                 status = OrderStatus.PAID,
                 orderedAt = orderedAt,
-                paidAt = paidAt
+                paidAt = paidAt,
+                paymentKey = "MOCK-PG-abc123"
             )
 
             mockMvc.post("/api/orders/1/pay")
@@ -174,6 +175,7 @@ class OrderControllerTest(
                     jsonPath("$.data.version") { value(3) }
                     jsonPath("$.data.status") { value("PAID") }
                     jsonPath("$.data.paidAt") { value("2026-05-08T12:05:00") }
+                    jsonPath("$.data.paymentKey") { value("MOCK-PG-abc123") }
                 }
 
             verify { orderUseCase.payOrder(PayOrderCommand(1L)) }
@@ -230,7 +232,8 @@ private fun sampleOrderResult(
     orderedAt: LocalDateTime,
     paidAt: LocalDateTime? = null,
     shippedAt: LocalDateTime? = null,
-    cancelledAt: LocalDateTime? = null
+    cancelledAt: LocalDateTime? = null,
+    paymentKey: String? = null
 ): OrderResult =
     OrderResult(
         id = id,
@@ -259,5 +262,6 @@ private fun sampleOrderResult(
         cancelledAt = cancelledAt,
         trackingNumber = null,
         cancelReason = null,
+        paymentKey = paymentKey,
         createdAt = orderedAt
     )

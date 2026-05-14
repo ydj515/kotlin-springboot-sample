@@ -19,6 +19,7 @@ import com.example.kotlinspringbootsample.domain.order.policy.OrderItemPolicy
 import com.example.kotlinspringbootsample.domain.order.policy.OrderStatusTransitionPolicy
 import com.example.kotlinspringbootsample.domain.order.repository.OrderRepository
 import com.example.kotlinspringbootsample.domain.order.service.OrderLookupService
+import com.example.kotlinspringbootsample.domain.payment.gateway.PaymentGateway
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
@@ -36,7 +37,8 @@ class OrderUseCase(
     private val customerLookupService: CustomerLookupService,
     private val orderLookupService: OrderLookupService,
     private val orderItemPolicy: OrderItemPolicy,
-    private val orderStatusTransitionPolicy: OrderStatusTransitionPolicy
+    private val orderStatusTransitionPolicy: OrderStatusTransitionPolicy,
+    private val paymentGateway: PaymentGateway
 ) {
     fun getOrders(command: FindOrdersCommand): Page<OrderSummaryResult> {
         val pageable = PageRequest.of(command.page, command.size, Sort.by(Sort.Direction.DESC, "createdAt"))
@@ -79,13 +81,18 @@ class OrderUseCase(
     }
 
     @Transactional
-    fun payOrder(command: PayOrderCommand): OrderResult =
-        orderLookupService.requireById(command.id)
-            .apply {
-                orderStatusTransitionPolicy.validatePayable(this)
-                markPaid()
-            }
-            .toResult()
+    fun payOrder(command: PayOrderCommand): OrderResult {
+        val order = orderLookupService.requireById(command.id)
+        orderStatusTransitionPolicy.validatePayable(order)
+
+        val approveResult = paymentGateway.approve(
+            amount = order.totalAmount,
+            idempotencyKey = UUID.randomUUID().toString()
+        )
+
+        order.markPaid(approveResult.approvedAt)
+        return order.toResult().copy(paymentKey = approveResult.paymentKey)
+    }
 
     @Transactional
     fun shipOrder(command: ShipOrderCommand): OrderResult =
