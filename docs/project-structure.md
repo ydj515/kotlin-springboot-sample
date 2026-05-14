@@ -22,18 +22,20 @@
   - `*UseCase`, `command`, `result`, 매핑 헬퍼를 둡니다.
 - `src/main/kotlin/.../domain`
   - 도메인 모델 계층입니다.
-  - 엔티티, 정책, 예외, 저장소 포트를 둡니다.
+  - 엔티티, 정책, 도메인 서비스, 예외, 저장소 포트를 둡니다.
 - `src/main/kotlin/.../infrastructure`
-  - JWT, filter, bootstrap seed 같은 외부 기술 연동 코드를 둡니다.
+  - JWT, 인증 어댑터, filter, bootstrap seed 같은 외부 기술 연동 코드를 둡니다.
 - `src/main/kotlin/.../config`
   - Spring/JPA/Swagger 설정을 둡니다.
 - `src/main/kotlin/.../common`
-  - 현재는 `BaseEntity` 같은 공통 타입을 둡니다.
+  - `BaseEntity`, 공통 예외, 로깅/트레이싱 키 같은 공통 타입을 둡니다.
 
 ### 현재 도메인 예시
 
 - `presentation/user`, `application/user`, `domain/user`
   - 회원가입과 등록 정책 예제
+- `presentation/auth`, `application/auth`, `infrastructure/security`
+  - `POST /api/auth/login`, JWT 발급/검증 흐름 예제
 - `presentation/order`, `application/order`, `domain/order`
   - 주문 aggregate와 연관관계 매핑 예제
 
@@ -46,7 +48,16 @@
 - 애플리케이션 클래스:
   - `xxUseCase`
 - 도메인 계층:
-  - 엔티티와 정책은 controller DTO를 직접 참조하지 않습니다.
+  - 엔티티, 정책, 서비스는 controller DTO를 직접 참조하지 않습니다.
+
+### 도메인 서비스 예시
+
+- `domain/user/service/UserRegistrationService`
+  - username 중복 확인과 저장소 연동
+- `domain/user/service/UserLookupService`
+  - username 기반 사용자 조회 보장
+- `domain/order/service/OrderLookupService`
+  - 주문 조회 보장과 not-found 예외 변환
 
 ### 테스트 구조
 
@@ -62,4 +73,5 @@
 ## 관련 문서
 
 - [아키텍처 경계 원칙](./architecture-boundaries.md)
+- [로깅 및 트레이싱 가이드](./logging-and-tracing.md)
 - [JPA 샘플 개요](./jpa-sample-overview.md)

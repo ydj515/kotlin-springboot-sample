@@ -20,6 +20,7 @@
 5. [JPA 사용 기준 가이드](./jpa-pattern-selection-guide.md)
 6. [새 기능 추가 체크리스트](./feature-addition-checklist.md)
 7. [에러 처리 가이드](./error-handling.md)
+8. [로깅 및 트레이싱 가이드](./logging-and-tracing.md)
 
 ## 문서 목록
 
@@ -30,4 +31,5 @@
 - [JPA 사용 기준 가이드](./jpa-pattern-selection-guide.md)
 - [새 기능 추가 체크리스트](./feature-addition-checklist.md)
 - [에러 처리 가이드](./error-handling.md)
+- [로깅 및 트레이싱 가이드](./logging-and-tracing.md)
 - [Kotlin 스타일 리뷰](./kotlin-style-review.md)

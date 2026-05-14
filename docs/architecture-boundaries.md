@@ -28,11 +28,15 @@
 
 - 엔티티 자신의 상태 변경 규칙은 엔티티 메서드로 둡니다.
 - 재사용 가능한 검증/판단 규칙은 `policy`로 분리합니다.
+- 저장소를 수반하는 도메인 행위는 `domain/{도메인}/service`로 분리합니다.
 
 예:
 
 - `UserRegistrationPolicy`
 - `OrderItemPolicy`
+- `UserRegistrationService`
+- `UserLookupService`
+- `OrderLookupService`
 
 ### 3. `presentation`은 HTTP 입출력만 담당합니다
 
@@ -49,7 +53,8 @@
 ### 5. `infrastructure`는 프레임워크/보안/부트스트랩 코드를 담당합니다
 
 - JWT 발급과 검증
-- Security filter
+- `UserDetailsService` 어댑터와 인증 매니저
+- request MDC 추적과 비동기 컨텍스트 전파
 - 초기 샘플 데이터 적재
 
 ## 의존 방향
@@ -70,10 +75,16 @@
 ## 현재 프로젝트에서 특히 보는 포인트
 
 - `User`
-  - 중복 username 판단은 `UserRegistrationPolicy`가 담당합니다.
+  - `UserRegistrationPolicy`는 username 정규화와 순수 규칙을 담당합니다.
+  - `UserRegistrationService`는 username 중복 확인과 저장소 연동을 담당합니다.
+  - `UserUseCase`는 비밀번호 인코딩과 결과 매핑만 조합합니다.
 - `Order`
   - aggregate root가 `OrderLine` 목록과 `totalAmount`를 관리합니다.
-  - `OrderUseCase`는 buyer 조회, item validation, 저장 순서만 조합합니다.
+  - `OrderLookupService`는 주문 조회 보장과 not-found 예외 변환을 담당합니다.
+  - `OrderUseCase`는 lookup service, buyer 조회, item validation, 상태 전이만 조합합니다.
+- `Auth`
+  - `AuthController -> AuthUseCase -> AuthenticationManager` 흐름으로 로그인 진입을 처리합니다.
+  - JWT 검증은 `JwtAuthenticationFilter`가 담당하고, 사용자 조회는 `DomainUserDetailsService`가 맡습니다.
 
 ## 관련 문서
 

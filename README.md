@@ -38,9 +38,9 @@ mise run build
 - `application`
   - `*UseCase`, `command`, `result`를 둡니다.
 - `domain`
-  - 엔티티, 정책(`policy`), 예외, 저장소 포트를 둡니다.
+  - 엔티티, 정책(`policy`), 도메인 서비스(`service`), 예외, 저장소 포트를 둡니다.
 - `infrastructure`
-  - JWT, filter, bootstrap seed 같은 기술 연동 코드를 둡니다.
+  - JWT 발급/검증, 인증 어댑터, MDC 추적, bootstrap seed 같은 기술 연동 코드를 둡니다.
 
 현재 샘플 도메인:
 
@@ -67,7 +67,8 @@ mise run build
 
 ## Sample API
 
-- `POST /signup`
+- `POST /api/users`
+- `POST /api/auth/login`
 - `GET /api/orders`
 - `GET /api/orders?status=PAID&searchMode=DERIVED`
 - `GET /api/orders?buyerUsername=alice&status=PAID&searchMode=JPQL`
@@ -84,6 +85,8 @@ mise run build
 - [문서 안내](./docs/README.md)
 - [프로젝트 구조 가이드](./docs/project-structure.md)
 - [아키텍처 경계 원칙](./docs/architecture-boundaries.md)
+- [로깅 및 트레이싱 가이드](./docs/logging-and-tracing.md)
+- [에러 처리 가이드](./docs/error-handling.md)
 - [JPA 샘플 개요](./docs/jpa-sample-overview.md)
 - [JPA 사용 기준 가이드](./docs/jpa-pattern-selection-guide.md)
 
