@@ -76,6 +76,20 @@
 - 멱등성: at-least-once delivery(클라이언트 재시도, 네트워크 timeout)에서 결제 중복 방지
 - aggregate 분리: DDD에서 transaction boundary와 일치하는 단위
 
+**Idempotency-Key 적용 범위**
+
+- **적용**: `POST /api/orders/{id}/pay` (Level 2), `POST /api/orders/{id}/cancel` (Level 5에서 refund compensation trigger)
+- **미적용**: `POST /api/orders/{id}/ship` (운영 admin 수동 작업이라 보통 idempotency-key 안 받음. Order.version optimistic lock으로 이중 처리 차단)
+- **미적용**: `POST /api/orders` (create), GET 모든 경로 (GET은 정의상 idempotent)
+- **이유**: "돈 움직임 + 외부 trigger(환불/알림) 가능 endpoint"만 적용. 실무 다수 패턴 따름. ship은 optimistic lock으로 충분.
+
+**Idempotency-Key 저장 전략 — endpoint별 분리 테이블**
+
+- pay: `payments.idempotency_key UNIQUE`
+- cancel: `cancellations.idempotency_key UNIQUE` (Level 5에서 도입; Level 2 시점에는 payments에만)
+- 통합 `idempotency_keys` 테이블 사용 안 함 — 도메인 의미가 분명히 드러나는 분리 방식 채택
+- 트레이드오프: endpoint 추가 시마다 컬럼 추가 필요. Stripe-style 통합 테이블이 확장성은 더 좋지만 학습용으로는 분리가 명확
+
 **Idempotency-Key 정책 (Required, Stripe 변형)**
 
 본 샘플은 학습/테스트 명확성을 위해 **header required** 정책 채택. 한국 PG 다수 패턴과도 일치.
@@ -267,6 +281,30 @@ CompensationTask
 **Replay 동작 (멱등 정상 케이스)**:
 - 같은 키 + 같은 order + 같은 amount → 200 OK + 기존 Payment replay (PG 호출 없음)
 - 500: PG 호출 실패 + 보상 처리 중 (Level 5)
+
+### POST /api/orders/{id}/cancel (Level 5~)
+
+**Request**:
+- Header: `Idempotency-Key: <client-generated UUID>` (**REQUIRED**)
+- Body: 선택 — `{"reason": "..."}`
+
+**Response**:
+- 200 OK
+- Body: OrderResponse (status=CANCELLED, cancelledAt, cancelReason, 이미 결제됐다면 refund 처리 결과 포함)
+
+**오류**:
+- 400 `IDEMPOTENCY_KEY_REQUIRED` / `IDEMPOTENCY_KEY_INVALID`: pay와 동일 규칙
+- 409 `IDEMPOTENCY_KEY_CONFLICT`: 다른 order에서 이미 사용된 키, 또는 같은 order인데 reason 등 본질 필드가 다름
+- 409: 이미 취소된 주문 또는 취소 불가 상태 (SHIPPED 등)
+- 500: PG 환불 실패 (Level 5 compensation_tasks로 전환)
+
+**저장**: `cancellations.idempotency_key UNIQUE` 컬럼 (Level 5 도입). Replay 시 기존 cancel 결과 그대로 반환.
+
+### POST /api/orders/{id}/ship — idempotency 미적용
+
+- `Order.version` 기반 optimistic locking으로 이중 처리 차단.
+- 운영 admin 수동 작업 컨텍스트라 별도 멱등성 키 받지 않음.
+- 알림(SMS)은 Level 4 outbox + idempotent consumer로 보호 (이벤트 레벨 멱등).
 
 ## 보안 고려사항
 

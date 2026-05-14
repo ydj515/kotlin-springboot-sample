@@ -244,6 +244,9 @@
 ### Task 5.1: schema
 - [ ] compensation_tasks(id, task_type, payload JSON, status, retry_count, next_attempt_at, created_at)
 - [ ] Payment.status에 `REFUND_FAILED` 추가
+- [ ] **cancellations 테이블 추가** (cancel idempotency 적용):
+  - 컬럼: id, order_id, idempotency_key (UNIQUE), reason, status (REQUESTED/SUCCEEDED/REFUND_FAILED), refunded_at, created_at
+  - cancel = 단순 상태 전이가 아니라 환불 trigger 수반하므로 멱등성 보호 필요
 
 ### Task 5.2: payOrder 보상 트랜잭션
 - [ ] try/catch 구조:
@@ -251,6 +254,15 @@
   - DB 실패 catch → 별도 트랜잭션(REQUIRES_NEW)으로 PG.refund 호출
   - refund 성공 → Payment.markRefunded + history
   - refund 실패 → CompensationTask insert (task_type=PG_REFUND)
+
+### Task 5.2.5: cancelOrder idempotency 적용
+- [ ] controller에 `@RequestHeader("Idempotency-Key", required = true) String idempotencyKey` 추가
+- [ ] 흐름:
+  - 같은 키 + 같은 order → 기존 cancellation 결과 replay
+  - 같은 키 + 다른 order → IdempotencyConflictException (409)
+  - 신규 → cancellations insert + Order 상태 전이 + (이미 PAID였다면 PG.refund 호출)
+- [ ] 미적용: ship, create (optimistic lock으로 충분)
+- [ ] 통합 테스트: replay / 다른 order conflict / 키 누락 400
 
 ### Task 5.3: CompensationRetryWorker
 - [ ] `@Scheduled` 1초 polling
