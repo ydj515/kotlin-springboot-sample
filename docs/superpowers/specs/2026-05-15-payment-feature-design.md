@@ -69,8 +69,6 @@
 - `payment_histories` 테이블: 상태 전이 audit 로그 N행
   - 컬럼: id, payment_id, from_status, to_status, occurred_at, reason
 - 클라이언트 `Idempotency-Key` HTTP 헤더 → 멱등성 보장
-  - 같은 키 재요청: 기존 결제 결과 replay (200 OK, 새 PG 호출 없음)
-  - 다른 주문 + 같은 키: 409 Conflict
 - Payment를 **별도 aggregate**로 모델링 (Order는 paymentKey 참조만 보유, 직접 join 없음)
 
 **왜 이 범위인가**
@@ -78,9 +76,25 @@
 - 멱등성: at-least-once delivery(클라이언트 재시도, 네트워크 timeout)에서 결제 중복 방지
 - aggregate 분리: DDD에서 transaction boundary와 일치하는 단위
 
+**Idempotency-Key 정책 (Required, Stripe 변형)**
+
+본 샘플은 학습/테스트 명확성을 위해 **header required** 정책 채택. 한국 PG 다수 패턴과도 일치.
+
+| 케이스 | 응답 | 비고 |
+|---|---|---|
+| 헤더 누락 | 400 Bad Request, code=`IDEMPOTENCY_KEY_REQUIRED` | 명확한 학습 신호 |
+| 빈 문자열 | 400 동일 | |
+| 형식 위반 (255자 초과) | 400, code=`IDEMPOTENCY_KEY_INVALID` | |
+| 같은 키 + 같은 order + 같은 amount | 200 OK + 기존 Payment replay (새 PG 호출 없음) | 정상 멱등 동작 |
+| 같은 키 + 다른 order | 409 Conflict, code=`IDEMPOTENCY_KEY_CONFLICT` | 키 재사용 방지 |
+| 같은 키 + 같은 order + 다른 amount | 409 Conflict, code=`IDEMPOTENCY_KEY_CONFLICT` | 위 변형 (body 변조 차단) |
+| 키 TTL | 학습용은 영구 보관 | 실제는 24h 권장 (Stripe 기준) |
+| 동시 같은 키 2건 (in-flight) | 두 번째 요청은 DB unique 제약으로 IdempotencyConflictException → 클라이언트 retry 유도 | (학습용 간단 처리, 정교한 lock 도입은 후속) |
+
 **핵심 결정**
 - `Payment.status` 전이 시 `payment_histories` 자동 insert (도메인 메서드 안에서)
-- 멱등성 키 출처: `Idempotency-Key` HTTP 헤더 (RFC 권고)
+- 멱등성 키는 **클라이언트 책임** — 서버는 받기만 하고 검증/저장. 형식은 UUID v4 권장 (강제는 아님)
+- 키 비교: order_id + idempotency_key 조합 unique. amount 변조 검증 추가
 
 ### Level 3: Transactional Outbox
 
@@ -236,16 +250,22 @@ CompensationTask
 
 ### POST /api/orders/{id}/pay
 **Request**:
-- Header: `Idempotency-Key: <UUID>` (Level 2~)
+- Header: `Idempotency-Key: <client-generated UUID>` (Level 2~, **REQUIRED**)
 - Body: (없음) — order id로 amount는 서버 계산
 
 **Response**:
 - 200 OK
 - Body: PaymentResponse (orderId, paymentKey, status, approvedAt)
 
-**오류**:
-- 409: 이미 결제된 주문 또는 멱등성 키 충돌 (다른 order)
-- 422: PG 승인 실패
+**오류 (Level 2~)**:
+- 400 `IDEMPOTENCY_KEY_REQUIRED`: 헤더 누락 또는 빈 문자열
+- 400 `IDEMPOTENCY_KEY_INVALID`: 형식 위반 (255자 초과 등)
+- 409 `IDEMPOTENCY_KEY_CONFLICT`: 멱등성 키가 다른 order에서 이미 사용됨, 또는 같은 order인데 amount가 다름
+- 409 `ORDER_ALREADY_PAID` (또는 상태 전이 위반): 이미 결제된 주문
+- 422 `PAYMENT_APPROVAL_FAILED`: PG 승인 실패 (Level 1~)
+
+**Replay 동작 (멱등 정상 케이스)**:
+- 같은 키 + 같은 order + 같은 amount → 200 OK + 기존 Payment replay (PG 호출 없음)
 - 500: PG 호출 실패 + 보상 처리 중 (Level 5)
 
 ## 보안 고려사항

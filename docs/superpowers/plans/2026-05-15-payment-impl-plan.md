@@ -141,26 +141,36 @@
 
 ### Task 2.3: OrderUseCase.payOrder 갱신 — Payment aggregate 사용
 
+**Idempotency-Key 정책: Required (누락 시 400)** — spec 참조.
+
 **핵심 흐름:**
-1. `Idempotency-Key` 헤더 수신
-2. `paymentRepository.findByIdempotencyKey(key)` → 존재하면 그 결과 replay
+1. `Idempotency-Key` 헤더 수신 (REQUIRED — 누락/빈 문자열은 controller에서 400으로 차단)
+2. `paymentRepository.findByIdempotencyKey(key)` → 존재 검증:
+   - 같은 order + 같은 amount → 기존 Payment 그대로 replay (PG 호출 없음, 200 OK)
+   - 다른 order 또는 같은 order에서 amount 다름 → `IdempotencyConflictException` (409)
 3. 없으면 Payment 생성 (REQUESTED 상태) + save
 4. PG.approve 호출
 5. 성공 시 Payment.markApproved + history insert + Order.markPaid
 
 - [ ] **Step 1: PayOrderCommand에 idempotencyKey 필드 추가**
-- [ ] **Step 2: payOrder 흐름 재작성**
-- [ ] **Step 3: replay 로직 검증 (같은 키 재요청 시 PG 호출 안 함)**
-- [ ] **Step 4: 다른 order + 같은 키 → IdempotencyConflictException**
+- [ ] **Step 2: payOrder 흐름 재작성 (key 검증 → replay or new payment)**
+- [ ] **Step 3: replay 로직 검증 (같은 키 재요청 시 PG 호출 안 함, 같은 paymentKey 반환)**
+- [ ] **Step 4: 다른 order + 같은 키 → IdempotencyConflictException (409)**
+- [ ] **Step 5: 같은 order + 같은 키 + 다른 amount → IdempotencyConflictException (409)**
 
 ### Task 2.4: presentation
-- [ ] kotlin/java-mybatis: payOrder controller에 `@RequestHeader("Idempotency-Key") String idempotencyKey` 추가
+- [ ] kotlin/java-mybatis: payOrder controller에 `@RequestHeader(value = "Idempotency-Key", required = true) String idempotencyKey` 추가
+  - 누락 → Spring이 자동으로 `MissingRequestHeaderException` → `GlobalExceptionHandler`에서 `IDEMPOTENCY_KEY_REQUIRED` 400으로 변환
+- [ ] 빈 문자열 / 255자 초과 검증 → `IDEMPOTENCY_KEY_INVALID` 400
+  - controller 또는 application 진입점에서 단순 길이 체크
 - [ ] Response에 `PaymentResponse` 노출 (orderId, paymentKey, status, approvedAt)
 - [ ] http 파일에 `Idempotency-Key: {{$uuid}}` 헤더 추가
+  - 추가 예시: 같은 키 재요청 (replay 동작 시연), 키 누락 (400 시연)
 
 ### Task 2.5: 통합 테스트
 - [ ] kotlin: PaymentRepositoryTest (JPA), payOrder 멱등성 통합 테스트
-- [ ] java-mybatis: PaymentMapperMybatisSliceTest, payOrder 멱등성 통합 테스트
+  - 케이스: 신규 결제 / replay / 다른 order conflict / 같은 order 다른 amount conflict / 키 누락 400
+- [ ] java-mybatis: PaymentMapperMybatisSliceTest, payOrder 멱등성 통합 테스트 (동일 케이스)
 
 ### Task 2.6: Level 2 commit & verify
 - [ ] 양쪽 각각 4~5개 task-unit commit 분리
