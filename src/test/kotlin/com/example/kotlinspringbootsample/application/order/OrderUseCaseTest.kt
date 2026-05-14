@@ -14,8 +14,9 @@ import com.example.kotlinspringbootsample.domain.order.policy.OrderItemPolicy
 import com.example.kotlinspringbootsample.domain.order.policy.OrderStatusTransitionPolicy
 import com.example.kotlinspringbootsample.domain.order.repository.OrderRepository
 import com.example.kotlinspringbootsample.domain.order.repository.projection.OrderStatusSummaryProjection
+import com.example.kotlinspringbootsample.domain.order.service.OrderLookupService
 import com.example.kotlinspringbootsample.domain.user.User
-import com.example.kotlinspringbootsample.domain.user.repository.UserRepository
+import com.example.kotlinspringbootsample.domain.user.service.UserLookupService
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.collections.shouldHaveSize
@@ -33,30 +34,32 @@ import java.time.LocalDateTime
 class OrderUseCaseTest : BehaviorSpec({
 
     val orderRepository = mockk<OrderRepository>()
-    val userRepository = mockk<UserRepository>()
+    val userLookupService = mockk<UserLookupService>()
+    val orderLookupService = mockk<OrderLookupService>()
     val orderUseCase = OrderUseCase(
         orderRepository = orderRepository,
-        userRepository = userRepository,
+        userLookupService = userLookupService,
+        orderLookupService = orderLookupService,
         orderItemPolicy = OrderItemPolicy(),
         orderStatusTransitionPolicy = OrderStatusTransitionPolicy()
     )
 
     beforeTest {
-        clearMocks(orderRepository, userRepository)
+        clearMocks(orderRepository, userLookupService, orderLookupService)
     }
 
     Given("주문 결제 요청이 들어오면") {
         When("주문이 CREATED 상태면") {
-            Then("save 재호출 없이 PAID 상태와 결제 시각을 반영한다") {
+            Then("lookup service로 주문을 보장하고 save 재호출 없이 PAID 상태와 결제 시각을 반영한다") {
                 val order = sampleOrder(id = 1L)
 
-                every { orderRepository.findByIdAndDeletedAtIsNull(1L) } returns order
+                every { orderLookupService.requireById(1L) } returns order
 
                 val result = orderUseCase.payOrder(PayOrderCommand(1L))
 
                 result.status shouldBe OrderStatus.PAID
                 result.paidAt.shouldNotBeNull()
-                verify(exactly = 1) { orderRepository.findByIdAndDeletedAtIsNull(1L) }
+                verify(exactly = 1) { orderLookupService.requireById(1L) }
                 verify(exactly = 0) { orderRepository.save(any()) }
             }
         }
@@ -67,7 +70,7 @@ class OrderUseCaseTest : BehaviorSpec({
                     markPaid(LocalDateTime.of(2026, 5, 8, 10, 0))
                 }
 
-                every { orderRepository.findByIdAndDeletedAtIsNull(1L) } returns order
+                every { orderLookupService.requireById(1L) } returns order
 
                 val exception = shouldThrow<InvalidOrderStatusTransitionException> {
                     orderUseCase.payOrder(PayOrderCommand(1L))
@@ -85,13 +88,14 @@ class OrderUseCaseTest : BehaviorSpec({
                     markPaid(LocalDateTime.of(2026, 5, 7, 9, 0))
                 }
 
-                every { orderRepository.findByIdAndDeletedAtIsNull(2L) } returns order
+                every { orderLookupService.requireById(2L) } returns order
 
                 val result = orderUseCase.shipOrder(ShipOrderCommand(2L))
 
                 result.status shouldBe OrderStatus.SHIPPED
                 result.paidAt shouldBe LocalDateTime.of(2026, 5, 7, 9, 0)
                 result.shippedAt.shouldNotBeNull()
+                verify(exactly = 1) { orderLookupService.requireById(2L) }
             }
         }
     }
@@ -104,13 +108,14 @@ class OrderUseCaseTest : BehaviorSpec({
                     markShipped(LocalDateTime.of(2026, 5, 7, 14, 0))
                 }
 
-                every { orderRepository.findByIdAndDeletedAtIsNull(3L) } returns order
+                every { orderLookupService.requireById(3L) } returns order
 
                 val exception = shouldThrow<InvalidOrderStatusTransitionException> {
                     orderUseCase.cancelOrder(CancelOrderCommand(3L))
                 }
 
                 exception.message shouldBe "only created or paid orders can be cancelled. current status: SHIPPED"
+                verify(exactly = 1) { orderLookupService.requireById(3L) }
             }
         }
     }
