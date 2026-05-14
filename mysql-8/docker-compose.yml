@@ -1,0 +1,25 @@
+services:
+  mysql:
+    image: ${MYSQL_IMAGE:-mysql:8.4.3}
+    restart: always
+    ports:
+      # 호스트 포트:컨테이너 포트
+      - "${MYSQL_PORT:-3306}:3306"
+    environment:
+      # root 계정의 비밀번호를 설정합니다. 보안을 위해 반드시 강력한 비밀번호로 변경하세요.
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      # 컨테이너가 처음 시작될 때 자동으로 생성할 데이터베이스 이름을 지정합니다.
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-mydatabase}
+      # 컨테이너의 타임존을 서울로 설정합니다.
+      TZ: ${TZ:-Asia/Seoul}
+    volumes:
+      # 데이터 영속성을 위해 명명된 볼륨(mysql_data)을 컨테이너의 데이터 디렉토리에 마운트합니다.
+      - mysql_data:/var/lib/mysql
+      # 호스트의 conf.d 디렉토리를 컨테이너의 설정 디렉토리에 마운트하여 외부에서 설정을 관리합니다.
+      - ./conf.d:/etc/mysql/conf.d
+      # 컨테이너가 처음 생성될 때 실행할 초기화 스크립트 디렉토리를 마운트합니다.
+      - ./initdb.d:/docker-entrypoint-initdb.d
+
+volumes:
+  # 데이터 영속성을 위한 Docker 볼륨을 정의합니다.
+  mysql_data:

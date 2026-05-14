@@ -1,0 +1,247 @@
+[mysqld]
+# ---------------------------------------------
+# MySQL custom configuration
+# ---------------------------------------------
+# 자주 조정하는 MySQL 설정을 한곳에 모아둔 샘플입니다.
+# 실제로 적용할 값은 필요한 항목만 주석 해제해서 사용하면 됩니다.
+#
+# 운영 관점에서 보면 보통 아래 순서로 먼저 확인합니다.
+# 1. 연결 수와 세션 timeout 이 적절한지
+# 2. InnoDB buffer pool / redo log 가 workload 에 맞는지
+# 3. slow query log, performance_schema 로 관측이 가능한지
+# 4. binlog, sync 계열 설정이 내구성 요구사항과 맞는지
+#
+# "좋은 값"은 절대값보다도 서버 메모리, 스토리지 성능, 애플리케이션 커넥션 풀,
+# 트랜잭션 특성, 복제 사용 여부에 따라 달라집니다.
+#
+# 아래 기본값 표기는 MySQL 8.4 기준입니다.
+
+# ---------------------------------------------
+# 기본 문자셋 / 정렬 규칙
+# ---------------------------------------------
+# 애플리케이션 기본 문자셋은 utf8mb4 를 권장합니다.
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
+
+# SQL 모드는 데이터 품질과 예외 동작에 큰 영향을 줍니다.
+# 엄격 모드를 유지하는 편이 일반적으로 안전합니다.
+# sql_mode = STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+
+# 기본 시간대는 컨테이너 TZ 환경변수와 함께 운영하는 편이 단순합니다.
+# 필요하면 서버 시간대를 명시할 수 있습니다.
+# default-time-zone = '+09:00'
+
+# ---------------------------------------------
+# 연결 / 세션
+# ---------------------------------------------
+# 동시에 허용할 최대 연결 수입니다.
+# 연결 수를 늘리면 메모리 사용량도 같이 증가하므로 애플리케이션 커넥션 풀과 같이 봐야 합니다.
+# 운영에서는 "DB 최대 연결 수 > 앱 풀 총합" 정도로 약간의 여유만 두는 편이 일반적입니다.
+# 무조건 크게 잡는 것보다, 앱 풀을 줄이고 timeout 을 관리하는 편이 더 안전한 경우가 많습니다.
+# 기본값: 151
+# max_connections = 151
+
+# 실패한 연결 시도 허용 횟수입니다.
+# 네트워크 불안정이나 헬스체크 실패가 잦은 환경에서는 예상보다 빨리 증가할 수 있습니다.
+# 기본값: 100
+# max_connect_errors = 100
+
+# 유휴 세션 종료 시간입니다.
+# API 서버 뒤에서는 너무 길게 두지 않는 편이 관리에 유리합니다.
+# 서버리스/짧은 커넥션 패턴이면 더 짧게, 배치/운영툴 접속이 많으면 더 길게 잡기도 합니다.
+# 시작점 예시:
+# wait_timeout = 600
+# interactive_timeout = 1800
+# 기본값: 둘 다 28800초
+# wait_timeout = 28800
+# interactive_timeout = 28800
+
+# 스레드 캐시 크기입니다.
+# 연결/종료가 잦은 환경에서 생성 비용을 줄일 수 있습니다.
+# thread cache miss 가 잦을 때 서서히 늘리는 편이 좋습니다.
+# 기본값: 9
+# thread_cache_size = 16
+
+# DNS 역방향 조회를 생략해 접속 지연을 줄일 때 종종 사용합니다.
+# host 기반 계정 전략과 같이 검토해야 합니다.
+# Kubernetes / container 환경에서는 고려할 만하지만, host 명 기반 계정은 바로 영향을 받습니다.
+# skip-name-resolve = ON
+
+# ---------------------------------------------
+# 패킷 / 임시 메모리
+# ---------------------------------------------
+# 대용량 INSERT, JSON, BLOB 처리 시 자주 확인하는 값입니다.
+# 애플리케이션 업로드 크기, binlog 이벤트 크기, ORM batch insert 패턴과 같이 봐야 합니다.
+# 기본값: 64M
+# max_allowed_packet = 64M
+
+# 메모리 임시 테이블 크기입니다.
+# 큰 GROUP BY / ORDER BY 가 많으면 함께 보는 항목입니다.
+# tmp_table_size 와 max_heap_table_size 는 둘 중 더 작은 값이 실질 상한처럼 동작하는 경우가 많습니다.
+# 둘을 같은 값으로 맞춰두는 편이 이해하기 쉽습니다.
+# 기본값: 둘 다 16M
+# tmp_table_size = 64M
+# max_heap_table_size = 64M
+
+# 정렬 / 조인 버퍼는 세션별로 증가할 수 있으므로 과도하게 키우면 위험합니다.
+# 느린 쿼리를 버퍼로 덮으려 하지 말고, 먼저 인덱스/실행계획을 보는 편이 맞습니다.
+# 기본값: sort_buffer_size = 256K, join_buffer_size = 256K,
+#         read_buffer_size = 128K, read_rnd_buffer_size = 256K
+# sort_buffer_size = 4M
+# join_buffer_size = 4M
+# read_buffer_size = 128K
+# read_rnd_buffer_size = 256K
+
+# ---------------------------------------------
+# InnoDB
+# ---------------------------------------------
+# MySQL 메모리 튜닝에서 가장 먼저 보는 항목 중 하나입니다.
+# 단일 MySQL 서버라면 전체 메모리의 50~70% 근처에서 시작하는 경우가 많습니다.
+# 여유 메모리는 OS 페이지 캐시, 세션 버퍼, 정렬/조인/임시 메모리, 복제/백업 도구도 함께 씁니다.
+# 컨테이너 메모리 제한이 있다면 그 제한을 기준으로 계산해야 합니다.
+# 기본값: 128MB
+# innodb_buffer_pool_size = 1G
+
+# 버퍼 풀 인스턴스 수입니다.
+# 버퍼 풀이 충분히 큰 경우에만 조정 의미가 생깁니다.
+# 최근 버전에서는 과거보다 체감도가 줄었고, 과도한 분할은 오히려 관리 포인트만 늘릴 수 있습니다.
+# 기본값: 1
+# innodb_buffer_pool_instances = 1
+
+# 트랜잭션 로그 버퍼 크기입니다.
+# 큰 트랜잭션이 자주 있으면 검토합니다.
+# 평소에는 크게 손대지 않지만, 대량 적재/배치 쓰기 패턴이 있으면 의미가 있습니다.
+# 기본값: 64MB
+# innodb_log_buffer_size = 16M
+
+# MySQL 8 에서 redo 로그 총 용량입니다.
+# 쓰기량이 많은 환경에서 checkpoint 압박을 줄이는 데 자주 봅니다.
+# TPS 가 높고 flush 가 자주 밀리면 비교적 먼저 검토하는 값입니다.
+# 다만 너무 크게 잡으면 장애 복구 시간이 늘어날 수 있습니다.
+# 기본값: 100MB
+# innodb_redo_log_capacity = 512M
+
+# 커밋 내구성과 성능 사이의 대표적인 트레이드오프 항목입니다.
+# 1: 가장 안전, 2: 일부 성능 우선
+# 금융/정산/주문 같이 유실 허용이 어려우면 보통 1을 유지합니다.
+# 일부 로그성/분석성 데이터라면 2를 검토하기도 합니다.
+# 기본값: 1
+# innodb_flush_log_at_trx_commit = 1
+
+# 디스크 I/O 방식입니다.
+# Linux + 별도 파일시스템 캐시 전략에서 자주 검토합니다.
+# 스토리지 종류와 운영체제에 따라 적합한 값이 달라질 수 있어, 벤더 가이드와 함께 보는 편이 안전합니다.
+# innodb_flush_method = O_DIRECT
+
+# 테이블별 ibd 파일 사용 여부입니다.
+# 운영에서는 보통 ON 을 유지합니다.
+# 테이블 단위 백업/복구, 공간 회수, 파일 단위 관리에 유리합니다.
+# 기본값: ON
+# innodb_file_per_table = ON
+
+# 스토리지 성능에 맞게 I/O 처리량을 추정합니다.
+# SSD/NVMe 환경에서는 값이 더 커질 수 있습니다.
+# 값이 너무 낮으면 background flush 가 보수적으로 움직이고, 너무 높으면 I/O 경쟁이 커질 수 있습니다.
+# 시작점 예시:
+# 일반 SSD: innodb_io_capacity = 400
+# NVMe: innodb_io_capacity = 1000 이상도 검토
+# 기본값: innodb_io_capacity = 10000, innodb_io_capacity_max = 20000
+# innodb_io_capacity = 200
+# innodb_io_capacity_max = 2000
+
+# 락 대기 시간입니다.
+# 장시간 블로킹이 의심될 때 같이 보는 항목입니다.
+# 비즈니스 트랜잭션 SLA 와 deadlock/재시도 전략을 같이 봐야 합니다.
+# 기본값: 50초
+# innodb_lock_wait_timeout = 50
+
+# ---------------------------------------------
+# 바이너리 로그 / 복제
+# ---------------------------------------------
+# 복제나 CDC 가 필요할 때 설정합니다.
+# 운영에서 point-in-time recovery, replica, Debezium 류 CDC 를 쓴다면 사실상 핵심 영역입니다.
+# server_id = 1
+# log_bin = mysql-bin
+# binlog_format = ROW
+# 기본값: sync_binlog = 1, binlog_expire_logs_seconds = 2592000, max_binlog_size = 1GB
+# sync_binlog = 1
+# binlog_expire_logs_seconds = 604800
+# max_binlog_size = 256M
+
+# 참고:
+# - sync_binlog = 1 은 가장 안전하지만 디스크 flush 비용이 큽니다.
+# - replica/CDC 가 없다면 binlog 를 굳이 켜지 않는 선택도 가능합니다.
+# - binlog 보관 기간은 백업 정책, 장애 복구 목표와 함께 잡아야 합니다.
+
+# ---------------------------------------------
+# 로깅 / 관측
+# ---------------------------------------------
+# 느린 쿼리 분석 시 가장 먼저 켜보는 항목입니다.
+# 운영 초기에 미리 켜두고 임계값을 보수적으로 잡아두면 장애 시 대응이 훨씬 수월합니다.
+# 시작점 예시:
+# slow_query_log = ON
+# long_query_time = 0.5
+# 기본값: long_query_time = 10초
+# slow_query_log = ON
+# slow_query_log_file = /var/lib/mysql/slow-query.log
+# long_query_time = 1
+# log_queries_not_using_indexes = OFF
+
+# 일반 쿼리 로그는 디버깅에는 유용하지만 운영에서는 부하가 큽니다.
+# 짧은 기간에만 한시적으로 사용하는 편이 좋습니다.
+# 기본값: OFF
+# general_log = OFF
+
+# 실행 통계와 모니터링에 유용합니다.
+# PMM, mysqld_exporter, statement 분석 도구와 같이 볼 때 활용도가 높습니다.
+# 기본값: ON
+# performance_schema = ON
+
+# 에러 로그 상세 수준입니다.
+# 너무 높이면 로그량이 빠르게 늘 수 있습니다.
+# log_error_verbosity = 2
+
+# ---------------------------------------------
+# 캐시 / 오픈 파일
+# ---------------------------------------------
+# 테이블 열기/닫기 비용을 줄이는 데 관련됩니다.
+# 스키마 수와 테이블 수가 많을수록 영향이 커집니다.
+# 기본값: table_open_cache = 4000, table_definition_cache = 2000
+# table_open_cache = 4000
+# table_definition_cache = 2000
+
+# ---------------------------------------------
+# 트랜잭션 / 격리 수준
+# ---------------------------------------------
+# 트랜잭션 격리 수준은 애플리케이션 락 전략과 함께 봐야 합니다.
+# 기본값(REPEATABLE READ)은 MySQL 생태계에서 익숙하지만, gap lock 영향 때문에
+# 일부 OLTP 서비스는 READ COMMITTED 를 선호하기도 합니다.
+# 기본값: REPEATABLE-READ
+# transaction_isolation = READ-COMMITTED
+
+# ---------------------------------------------
+# 운영 시작점 예시
+# ---------------------------------------------
+# 아래는 "작은~중간 규모 단일 인스턴스"에서 자주 시작점으로 검토하는 예시입니다.
+# 그대로 정답은 아니고, 메모리/디스크/복제 여부에 따라 반드시 조정해야 합니다.
+#
+# max_connections = 200
+# wait_timeout = 600
+# interactive_timeout = 1800
+# max_allowed_packet = 64M
+# tmp_table_size = 64M
+# max_heap_table_size = 64M
+# innodb_buffer_pool_size = 1G
+# innodb_redo_log_capacity = 1G
+# innodb_flush_log_at_trx_commit = 1
+# slow_query_log = ON
+# long_query_time = 0.5
+# performance_schema = ON
+
+[client]
+# 컨테이너 내부 mysql 클라이언트도 utf8mb4 를 기본 사용하도록 맞춥니다.
+default-character-set = utf8mb4
+
+[mysql]
+# mysql CLI 출력도 같은 문자셋 기준을 사용합니다.
+default-character-set = utf8mb4
