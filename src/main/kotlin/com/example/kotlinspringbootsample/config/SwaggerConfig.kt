@@ -298,10 +298,10 @@ class SwaggerConfig {
 }
 
 private const val SIGNUP_REQUEST_EXAMPLE =
-    """{"username":"user1","password":"password1"}"""
+    """{"username":"user1","password":"password1","name":"User One","email":"user1@example.com","userType":"USER","trialCount":0}"""
 
 private const val SIGNUP_SUCCESS_EXAMPLE =
-    """{"result":"success","code":"201","message":"Created","timestamp":"2026-05-08T13:30:00","data":{"username":"user1"}}"""
+    """{"result":"success","code":"201","message":"Created","timestamp":"2026-05-08T13:30:00","data":{"id":1,"username":"user1","name":"User One","email":"user1@example.com","userType":"USER","lastLoginAt":null,"createdAt":"2026-05-08T13:30:00","updatedAt":null,"deletedAt":null,"lastPasswordUpdatedAt":null,"trialCount":0,"roles":[]}}"""
 
 private const val SIGNUP_VALIDATION_FAILURE_EXAMPLE =
     """{"result":"failure","code":"400","message":"Invalid Request","timestamp":"2026-05-08T13:30:00","errors":{"username":"Username must be between 4 and 10 characters","password":"Password must be between 8 and 15 characters"}}"""
