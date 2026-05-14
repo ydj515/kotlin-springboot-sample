@@ -14,7 +14,7 @@ import com.example.kotlinspringbootsample.application.order.result.OrderSummaryR
 import com.example.kotlinspringbootsample.domain.order.OrderStatus
 import com.example.kotlinspringbootsample.domain.order.exception.InvalidOrderStatusTransitionException
 import com.example.kotlinspringbootsample.infrastructure.security.CustomAuthenticationManager
-import com.example.kotlinspringbootsample.infrastructure.security.TokenProvider
+import com.example.kotlinspringbootsample.infrastructure.security.JwtTokenProvider
 import com.ninjasquad.springmockk.MockkBean
 import io.kotest.core.spec.style.DescribeSpec
 import io.mockk.every
@@ -42,7 +42,7 @@ class OrderControllerTest(
     @Autowired private val mockMvc: MockMvc,
     @MockkBean private val orderUseCase: OrderUseCase,
     @MockkBean private val customAuthenticationManager: CustomAuthenticationManager,
-    @MockkBean private val tokenProvider: TokenProvider
+    @MockkBean private val jwtTokenProvider: JwtTokenProvider
 ) : DescribeSpec({
 
     val paidAt = LocalDateTime.of(2026, 5, 8, 12, 5)

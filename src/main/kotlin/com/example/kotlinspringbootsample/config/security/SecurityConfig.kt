@@ -1,10 +1,7 @@
 package com.example.kotlinspringbootsample.config.security
 
-import com.example.kotlinspringbootsample.infrastructure.security.AuthFilter
-import com.example.kotlinspringbootsample.infrastructure.security.CustomAuthenticationManager
-import com.example.kotlinspringbootsample.infrastructure.security.CustomUsernamePasswordAuthenticationFilter
-import com.example.kotlinspringbootsample.infrastructure.security.TokenProvider
-import com.fasterxml.jackson.databind.ObjectMapper
+import com.example.kotlinspringbootsample.infrastructure.security.JwtAuthenticationFilter
+import com.example.kotlinspringbootsample.infrastructure.security.JwtTokenProvider
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
@@ -12,20 +9,18 @@ import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.web.SecurityFilterChain
-import org.springframework.security.web.authentication.www.BasicAuthenticationFilter
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
 
 @Configuration
 class SecurityConfig(
-    private val tokenProvider: TokenProvider,
-    private val objectMapper: ObjectMapper
+    private val jwtTokenProvider: JwtTokenProvider
 ) {
 
     private companion object {
         val PERMITTED_LIST = arrayOf(
             "/",
-            "/login",
-            "/logout",
-            "/signup",
+            "/api/auth/login",
+            "/api/users",
             "/swagger-ui/**",
             "/swagger-ui",
             "/swagger/**",
@@ -35,17 +30,10 @@ class SecurityConfig(
             "/h2-console/**",
             "/swagger-ui.html"
         )
-
-        val API_WHITE_LIST = arrayOf(
-            "/api/**"
-        )
     }
 
     @Bean
-    fun filterChain(
-        http: HttpSecurity,
-        customAuthenticationManager: CustomAuthenticationManager
-    ): SecurityFilterChain {
+    fun filterChain(http: HttpSecurity): SecurityFilterChain {
         return http
             .csrf { it.disable() }
             .cors { }
@@ -56,16 +44,12 @@ class SecurityConfig(
             .authorizeHttpRequests {
                 it
                     .requestMatchers(*PERMITTED_LIST).permitAll()
-                    .requestMatchers(*API_WHITE_LIST).permitAll()
+                    .anyRequest().authenticated()
             }
-            .addFilter(
-                CustomUsernamePasswordAuthenticationFilter(
-                    customAuthenticationManager,
-                    tokenProvider,
-                    objectMapper
-                )
+            .addFilterBefore(
+                JwtAuthenticationFilter(jwtTokenProvider),
+                UsernamePasswordAuthenticationFilter::class.java
             )
-            .addFilterBefore(AuthFilter(tokenProvider), BasicAuthenticationFilter::class.java)
             .build()
     }
 

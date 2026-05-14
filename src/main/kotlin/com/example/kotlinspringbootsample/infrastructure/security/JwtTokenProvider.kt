@@ -1,7 +1,13 @@
 package com.example.kotlinspringbootsample.infrastructure.security
 
-import com.example.kotlinspringbootsample.application.auth.result.LoginResponse
-import io.jsonwebtoken.*
+import io.jsonwebtoken.Claims
+import io.jsonwebtoken.ExpiredJwtException
+import io.jsonwebtoken.JwtException
+import io.jsonwebtoken.JwtParser
+import io.jsonwebtoken.Jwts
+import io.jsonwebtoken.MalformedJwtException
+import io.jsonwebtoken.SignatureAlgorithm
+import io.jsonwebtoken.UnsupportedJwtException
 import io.jsonwebtoken.io.Decoders
 import io.jsonwebtoken.security.Keys
 import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException
@@ -12,26 +18,24 @@ import org.springframework.security.core.userdetails.User
 import org.springframework.stereotype.Component
 import java.security.Key
 import java.time.Instant
-import java.util.*
+import java.util.Date
 
 @Component
-class TokenProvider(
-    private val jwtProperties: JwtProperties
+class JwtTokenProvider(
+    jwtProperties: JwtProperties
 ) {
     private val key: Key = Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtProperties.secretKey))
     private val parser: JwtParser = Jwts.parserBuilder().setSigningKey(key).build()
     private val expirationMillis = jwtProperties.accessTokenExpiration
 
-    fun generateTokenDto(authentication: Authentication): LoginResponse {
+    fun issueAccessToken(authentication: Authentication): IssuedAccessToken {
         val authorities = authentication.authorities.joinToString(",") { it.authority }
         val now = Instant.now()
-        val accessToken = createAccessToken(authentication.name, authorities, now)
 
-        return LoginResponse(
-            userId = authentication.name,
-            type = AuthConstants.BEARER_PREFIX,
-            accessToken = accessToken,
-            accessTokenExpired = now.toEpochMilli() + expirationMillis
+        return IssuedAccessToken(
+            tokenType = AuthConstants.BEARER_PREFIX.trim(),
+            accessToken = createAccessToken(authentication.name, authorities, now),
+            accessTokenExpiresAt = now.toEpochMilli() + expirationMillis
         )
     }
 
@@ -49,6 +53,7 @@ class TokenProvider(
         val authorities = claims[AuthConstants.AUTH_PREFIX]
             ?.toString()
             ?.split(",")
+            ?.filter(String::isNotBlank)
             ?.map(::SimpleGrantedAuthority)
             ?: throw AuthenticationCredentialsNotFoundException("권한 정보가 없는 JWT 토큰입니다.")
 
@@ -61,22 +66,28 @@ class TokenProvider(
         try {
             parser.parseClaimsJws(token)
             true
-        } catch (e: SecurityException) {
+        } catch (exception: SecurityException) {
             throw AuthenticationCredentialsNotFoundException("잘못된 JWT 서명입니다.")
-        } catch (e: MalformedJwtException) {
+        } catch (exception: MalformedJwtException) {
             throw AuthenticationCredentialsNotFoundException("잘못된 JWT 서명입니다.")
-        } catch (e: ExpiredJwtException) {
+        } catch (exception: ExpiredJwtException) {
             throw JwtException("만료된 JWT 토큰입니다.")
-        } catch (e: UnsupportedJwtException) {
+        } catch (exception: UnsupportedJwtException) {
             throw UnsupportedJwtException("지원되지 않는 JWT 토큰입니다.")
-        } catch (e: IllegalArgumentException) {
+        } catch (exception: IllegalArgumentException) {
             throw IllegalArgumentException("JWT 토큰이 잘못되었습니다.")
         }
 
     private fun parseClaims(token: String): Claims =
         try {
             parser.parseClaimsJws(token).body
-        } catch (e: ExpiredJwtException) {
-            e.claims
+        } catch (exception: ExpiredJwtException) {
+            exception.claims
         }
+
+    data class IssuedAccessToken(
+        val tokenType: String,
+        val accessToken: String,
+        val accessTokenExpiresAt: Long
+    )
 }

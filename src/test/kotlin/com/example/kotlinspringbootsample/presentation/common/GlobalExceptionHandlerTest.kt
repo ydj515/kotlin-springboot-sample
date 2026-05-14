@@ -2,7 +2,7 @@ package com.example.kotlinspringbootsample.presentation.common
 
 import com.example.kotlinspringbootsample.domain.user.exception.UserAlreadyException
 import com.example.kotlinspringbootsample.infrastructure.security.CustomAuthenticationManager
-import com.example.kotlinspringbootsample.infrastructure.security.TokenProvider
+import com.example.kotlinspringbootsample.infrastructure.security.JwtTokenProvider
 import com.ninjasquad.springmockk.MockkBean
 import io.kotest.core.spec.style.DescribeSpec
 import org.springframework.beans.factory.annotation.Autowired
@@ -27,7 +27,7 @@ import org.springframework.test.web.servlet.get
 class GlobalExceptionHandlerTest(
     @Autowired private val mockMvc: MockMvc,
     @MockkBean private val customAuthenticationManager: CustomAuthenticationManager,
-    @MockkBean private val tokenProvider: TokenProvider
+    @MockkBean private val jwtTokenProvider: JwtTokenProvider
 ) : DescribeSpec({
 
     describe("GlobalExceptionHandler") {

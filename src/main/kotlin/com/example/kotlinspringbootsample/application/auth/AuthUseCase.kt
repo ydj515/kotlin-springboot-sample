@@ -1,20 +1,28 @@
 package com.example.kotlinspringbootsample.application.auth
 
-import com.example.kotlinspringbootsample.domain.user.repository.UserRepository
-import org.springframework.security.core.authority.SimpleGrantedAuthority
-import org.springframework.security.core.userdetails.User
-import org.springframework.security.core.userdetails.UserDetails
-import org.springframework.security.core.userdetails.UserDetailsService
-import org.springframework.security.core.userdetails.UsernameNotFoundException
+import com.example.kotlinspringbootsample.application.auth.command.LoginCommand
+import com.example.kotlinspringbootsample.application.auth.result.LoginResult
+import com.example.kotlinspringbootsample.infrastructure.security.JwtTokenProvider
+import org.springframework.security.authentication.AuthenticationManager
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.stereotype.Service
 
 @Service
 class AuthUseCase(
-    private val userRepository: UserRepository
-) : UserDetailsService {
+    private val authenticationManager: AuthenticationManager,
+    private val jwtTokenProvider: JwtTokenProvider
+) {
+    fun login(command: LoginCommand): LoginResult {
+        val authentication = authenticationManager.authenticate(
+            UsernamePasswordAuthenticationToken(command.username, command.password)
+        )
+        val issuedAccessToken = jwtTokenProvider.issueAccessToken(authentication)
 
-    override fun loadUserByUsername(username: String): UserDetails =
-        userRepository.findByUsername(username)
-            ?.let { member -> User(member.username, member.password, listOf(SimpleGrantedAuthority("ROLE_USER"))) }
-            ?: throw UsernameNotFoundException("유효하지 않은 회원입니다.")
+        return LoginResult(
+            username = authentication.name,
+            tokenType = issuedAccessToken.tokenType,
+            accessToken = issuedAccessToken.accessToken,
+            accessTokenExpiresAt = issuedAccessToken.accessTokenExpiresAt
+        )
+    }
 }

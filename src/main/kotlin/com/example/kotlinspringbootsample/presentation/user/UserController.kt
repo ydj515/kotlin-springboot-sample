@@ -52,7 +52,7 @@ class UserController(private val userUseCase: UserUseCase) {
         ]
     )
     @ResponseStatus(HttpStatus.CREATED)
-    @PostMapping("/signup", "/api/users")
+    @PostMapping("/api/users")
     fun signUp(@Valid @RequestBody signUpRequest: SignupRequest): ApiResult.Success<SignupResponse> =
         ApiResult.success(userUseCase.registerMember(signUpRequest.toCommand()).toResponse(), ResultCode.CREATED)
 }

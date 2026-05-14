@@ -41,7 +41,7 @@ class SwaggerConfig {
     fun publicApi(): GroupedOpenApi =
         GroupedOpenApi.builder()
             .group("public")
-            .pathsToMatch("/api/**", "/signup")
+            .pathsToMatch("/api/**")
             .addOpenApiCustomizer(publicApiCustomizer())
             .build()
 
@@ -84,7 +84,7 @@ class SwaggerConfig {
     }
 
     private fun customizeOperations(openApi: OpenAPI) {
-        openApi.customizePost("/signup") {
+        openApi.customizePost("/api/users") {
             requestBody = requestBody.withExamples(
                 description = "회원가입 요청 바디",
                 "request" to SwaggerRefs.SIGNUP_REQUEST_EXAMPLE_REF
