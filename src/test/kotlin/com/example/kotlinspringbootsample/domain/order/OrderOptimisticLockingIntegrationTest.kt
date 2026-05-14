@@ -3,27 +3,24 @@ package com.example.kotlinspringbootsample.domain.order
 import com.example.kotlinspringbootsample.domain.customer.Customer
 import com.example.kotlinspringbootsample.domain.customer.repository.CustomerRepository
 import com.example.kotlinspringbootsample.domain.order.repository.OrderRepository
+import com.example.kotlinspringbootsample.support.MySqlIntegrationTestSupport
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.orm.ObjectOptimisticLockingFailureException
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.math.BigDecimal
 import java.time.LocalDateTime
 
-@SpringBootTest
-@ActiveProfiles("test")
 class OrderOptimisticLockingIntegrationTest @Autowired constructor(
     private val orderRepository: OrderRepository,
     private val customerRepository: CustomerRepository,
     transactionManager: PlatformTransactionManager
-) {
+) : MySqlIntegrationTestSupport() {
     private val transactionTemplate = TransactionTemplate(transactionManager)
     private val createdOrderIds = mutableListOf<Long>()
     private val createdCustomerIds = mutableListOf<Long>()

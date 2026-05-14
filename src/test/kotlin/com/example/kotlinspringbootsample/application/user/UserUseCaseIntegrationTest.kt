@@ -8,22 +8,19 @@ import com.example.kotlinspringbootsample.application.user.result.UserResult
 import com.example.kotlinspringbootsample.domain.user.UserType
 import com.example.kotlinspringbootsample.domain.user.exception.UserNotFoundException
 import com.example.kotlinspringbootsample.domain.user.repository.UserRepository
+import com.example.kotlinspringbootsample.support.MySqlIntegrationTestSupport
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.security.crypto.password.PasswordEncoder
-import org.springframework.test.context.ActiveProfiles
 
-@SpringBootTest
-@ActiveProfiles("test")
 class UserUseCaseIntegrationTest @Autowired constructor(
     private val userUseCase: UserUseCase,
     private val userRepository: UserRepository,
     private val passwordEncoder: PasswordEncoder
-) {
+) : MySqlIntegrationTestSupport() {
     private val createdUserIds = mutableListOf<Long>()
 
     private fun createUser(

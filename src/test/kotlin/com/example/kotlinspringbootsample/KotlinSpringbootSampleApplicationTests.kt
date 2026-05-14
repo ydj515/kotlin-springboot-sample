@@ -1,12 +1,9 @@
 package com.example.kotlinspringbootsample
 
+import com.example.kotlinspringbootsample.support.MySqlIntegrationTestSupport
 import org.junit.jupiter.api.Test
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 
-@SpringBootTest
-@ActiveProfiles("test")
-class KotlinSpringbootSampleApplicationTests {
+class KotlinSpringbootSampleApplicationTests : MySqlIntegrationTestSupport() {
 
     @Test
     fun contextLoads() {

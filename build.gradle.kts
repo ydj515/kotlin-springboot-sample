@@ -33,6 +33,7 @@ dependencies {
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.17")
 
     // db
+    runtimeOnly("com.mysql:mysql-connector-j")
     runtimeOnly("com.h2database:h2")
 
     // jwt
@@ -42,6 +43,7 @@ dependencies {
 
     // test
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
 
     // Kotest 의존성
@@ -52,6 +54,10 @@ dependencies {
     // MockK 의존성
     testImplementation("io.mockk:mockk:1.13.7")
     testImplementation("com.ninja-squad:springmockk:4.0.2")
+
+    // Testcontainers
+    testImplementation("org.testcontainers:junit-jupiter")
+    testImplementation("org.testcontainers:mysql")
 
 }
 
