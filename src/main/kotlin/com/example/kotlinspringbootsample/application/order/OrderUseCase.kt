@@ -24,7 +24,9 @@ import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 @Service
@@ -122,6 +124,13 @@ class OrderUseCase(
                 orderRepository.findAllByDeletedAtIsNull(pageable)
         }
 
-    private fun generateOrderNo(): String =
-        "ORD-${LocalDateTime.now().year}-${UUID.randomUUID().toString().take(8).uppercase()}"
+    private fun generateOrderNo(): String {
+        val datePart = LocalDate.now().format(DATE_FORMATTER)
+        val randomPart = UUID.randomUUID().toString().replace("-", "").take(10).uppercase()
+        return "ORD-$datePart-$randomPart"
+    }
+
+    private companion object {
+        val DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+    }
 }
