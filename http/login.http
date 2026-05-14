@@ -1,19 +1,24 @@
 
 ### 로그인
-POST {{host}}/login
+POST {{host}}/api/auth/login
 Content-Type: application/json
 
 {
   "username": "test",
   "password": "test"
 }
+
+
 > {%
-    client.test("Validate", function() {
+    client.test("Validate login response", function() {
         client.assert(response.status === 200, "Response status is not 200");
         client.assert(response.contentType.mimeType === "application/json", "Expected 'application/json'");
-        client.assert(response.body.data.expires_in && typeof response.body.data.expires_in === "number", "expires_in is missing or not a valid number");
-        client.assert(response.headers.valueOf("Authorization") && response.headers.valueOf("Authorization").startsWith("Bearer "), "Authorization header is missing or invalid");
+        const authorization = response.headers.valueOf("Authorization");
+        client.assert(authorization !== null, "Authorization header is missing");
+        client.assert(authorization.startsWith("Bearer "), "Authorization header must start with Bearer ");
+        const accessToken = authorization.substring("Bearer ".length);
+        client.assert(accessToken.length > 0, "Access token is empty");
+        client.global.set("accessToken", accessToken);
     });
 
-    client.global.set("accessToken",response.headers.valueOf("Authorization").split("Bearer ")[1])
 %}

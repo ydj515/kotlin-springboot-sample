@@ -1,9 +1,47 @@
-
-### 로그인
-POST {{host}}/signup
+### 회원가입 (POST는 permitAll)
+POST {{host}}/api/users
 Content-Type: application/json
 
 {
-  "username": "test1",
-  "password": "qwer1234"
+  "username": "user1",
+  "password": "password1",
+  "name": "User One",
+  "email": "user1@example.com",
+  "userType": "USER",
+  "trialCount": 0
 }
+
+### 사용자 전체 조회
+GET {{host}}/api/users
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+### 사용자 단건 조회
+GET {{host}}/api/users/1
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+### username으로 사용자 조회
+GET {{host}}/api/users/detail?username=user1
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+### 사용자 수정
+PUT {{host}}/api/users
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "id": 1,
+  "username": "user1",
+  "password": "newpassword1",
+  "name": "User One Updated",
+  "email": "user1.updated@example.com",
+  "userType": "MANAGER",
+  "trialCount": 1
+}
+
+### 사용자 삭제
+DELETE {{host}}/api/users/1
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
