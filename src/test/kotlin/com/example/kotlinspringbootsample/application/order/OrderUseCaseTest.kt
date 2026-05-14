@@ -17,11 +17,13 @@ import com.example.kotlinspringbootsample.domain.order.policy.OrderStatusTransit
 import com.example.kotlinspringbootsample.domain.order.repository.OrderRepository
 import com.example.kotlinspringbootsample.domain.order.repository.projection.OrderStatusSummaryProjection
 import com.example.kotlinspringbootsample.domain.order.service.OrderLookupService
+import com.example.kotlinspringbootsample.domain.payment.exception.PaymentApprovalFailedException
 import com.example.kotlinspringbootsample.domain.payment.gateway.ApproveResult
 import com.example.kotlinspringbootsample.domain.payment.gateway.PaymentGateway
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.mockk.clearMocks
@@ -87,6 +89,43 @@ class OrderUseCaseTest : BehaviorSpec({
 
                 exception.message shouldBe "only created orders can be paid. current status: PAID"
                 verify(exactly = 0) { paymentGateway.approve(any(), any()) }
+            }
+        }
+
+        When("PG approve가 PaymentApprovalFailedException을 던지면") {
+            Then("Order 상태가 CREATED로 유지되고 예외가 그대로 전파된다") {
+                val order = sampleOrder(id = 1L)
+
+                every { orderLookupService.requireById(1L) } returns order
+                every { paymentGateway.approve(order.totalAmount, any()) } throws
+                    PaymentApprovalFailedException("PG declined: insufficient balance")
+
+                val exception = shouldThrow<PaymentApprovalFailedException> {
+                    orderUseCase.payOrder(PayOrderCommand(1L))
+                }
+
+                exception.message shouldBe "PG declined: insufficient balance"
+                order.status shouldBe OrderStatus.CREATED
+                order.paidAt.shouldBeNull()
+                verify(exactly = 1) { paymentGateway.approve(order.totalAmount, any()) }
+                verify(exactly = 0) { orderRepository.save(any()) }
+            }
+        }
+
+        When("PG approve가 예상치 못한 RuntimeException을 던지면") {
+            Then("예외가 그대로 전파되어 상위에서 처리하도록 한다") {
+                val order = sampleOrder(id = 1L)
+
+                every { orderLookupService.requireById(1L) } returns order
+                every { paymentGateway.approve(order.totalAmount, any()) } throws
+                    RuntimeException("network timeout")
+
+                shouldThrow<RuntimeException> {
+                    orderUseCase.payOrder(PayOrderCommand(1L))
+                }
+
+                order.status shouldBe OrderStatus.CREATED
+                order.paidAt.shouldBeNull()
             }
         }
     }
