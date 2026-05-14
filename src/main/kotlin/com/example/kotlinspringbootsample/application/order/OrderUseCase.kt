@@ -19,7 +19,12 @@ import com.example.kotlinspringbootsample.domain.order.policy.OrderItemPolicy
 import com.example.kotlinspringbootsample.domain.order.policy.OrderStatusTransitionPolicy
 import com.example.kotlinspringbootsample.domain.order.repository.OrderRepository
 import com.example.kotlinspringbootsample.domain.order.service.OrderLookupService
+import com.example.kotlinspringbootsample.domain.payment.Payment
+import com.example.kotlinspringbootsample.domain.payment.PaymentStatus
+import com.example.kotlinspringbootsample.domain.payment.exception.IdempotencyConflictException
+import com.example.kotlinspringbootsample.domain.payment.exception.PaymentApprovalFailedException
 import com.example.kotlinspringbootsample.domain.payment.gateway.PaymentGateway
+import com.example.kotlinspringbootsample.domain.payment.repository.PaymentRepository
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
@@ -38,7 +43,8 @@ class OrderUseCase(
     private val orderLookupService: OrderLookupService,
     private val orderItemPolicy: OrderItemPolicy,
     private val orderStatusTransitionPolicy: OrderStatusTransitionPolicy,
-    private val paymentGateway: PaymentGateway
+    private val paymentGateway: PaymentGateway,
+    private val paymentRepository: PaymentRepository
 ) {
     fun getOrders(command: FindOrdersCommand): Page<OrderSummaryResult> {
         val pageable = PageRequest.of(command.page, command.size, Sort.by(Sort.Direction.DESC, "createdAt"))
@@ -83,15 +89,67 @@ class OrderUseCase(
     @Transactional
     fun payOrder(command: PayOrderCommand): OrderResult {
         val order = orderLookupService.requireById(command.id)
-        orderStatusTransitionPolicy.validatePayable(order)
 
-        val approveResult = paymentGateway.approve(
-            amount = order.totalAmount,
-            idempotencyKey = UUID.randomUUID().toString()
+        // 1. Idempotency check: 같은 키 이미 존재?
+        val existing = paymentRepository.findByIdempotencyKey(command.idempotencyKey)
+        if (existing != null) {
+            return replayExistingPayment(existing, order, command)
+        }
+
+        // 2. 신규 결제: 상태 전이 검증 + Payment.REQUESTED 저장
+        orderStatusTransitionPolicy.validatePayable(order)
+        val payment = paymentRepository.save(
+            Payment.request(
+                orderId = requireNotNull(order.id),
+                idempotencyKey = command.idempotencyKey,
+                amount = order.totalAmount
+            )
         )
 
+        // 3. PG.approve 호출 (실패 시 Payment.FAILED로 기록 후 예외 재전파)
+        val approveResult = try {
+            paymentGateway.approve(order.totalAmount, command.idempotencyKey)
+        } catch (e: PaymentApprovalFailedException) {
+            payment.markFailed(reason = e.message ?: "PG declined")
+            paymentRepository.save(payment)
+            throw e
+        }
+
+        // 4. 성공: Payment.APPROVED + Order.markPaid
+        payment.markApproved(approveResult.paymentKey, approveResult.approvedAt)
+        paymentRepository.save(payment)
         order.markPaid(approveResult.approvedAt)
+
         return order.toResult().copy(paymentKey = approveResult.paymentKey)
+    }
+
+    private fun replayExistingPayment(
+        existing: Payment,
+        order: Order,
+        command: PayOrderCommand
+    ): OrderResult {
+        if (existing.orderId != order.id) {
+            throw IdempotencyConflictException(
+                "idempotency key already used for another order (orderId=${existing.orderId})"
+            )
+        }
+        if (existing.amount.compareTo(order.totalAmount) != 0) {
+            throw IdempotencyConflictException(
+                "idempotency key was used with a different amount (expected=${existing.amount}, requested=${order.totalAmount})"
+            )
+        }
+        return when (existing.status) {
+            PaymentStatus.APPROVED -> order.toResult().copy(paymentKey = existing.paymentKey)
+            PaymentStatus.FAILED -> throw PaymentApprovalFailedException(
+                "payment previously failed for this idempotency key"
+            )
+            PaymentStatus.REQUESTED -> throw IdempotencyConflictException(
+                "payment for this idempotency key is still in progress"
+            )
+            else -> throw IdempotencyConflictException(
+                "payment for this idempotency key is in an unrecoverable state: ${existing.status}"
+            )
+        }
     }
 
     @Transactional

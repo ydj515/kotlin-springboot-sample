@@ -7,6 +7,7 @@ import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.MethodArgumentNotValidException
+import org.springframework.web.bind.MissingRequestHeaderException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
@@ -42,6 +43,25 @@ class GlobalExceptionHandler {
                 )
             )
         )
+
+    @ExceptionHandler(MissingRequestHeaderException::class)
+    fun handleMissingRequestHeader(
+        ex: MissingRequestHeaderException,
+        request: HttpServletRequest
+    ): ResponseEntity<ApiResult.Failure> {
+        val resultCode = if (ex.headerName.equals("Idempotency-Key", ignoreCase = true)) {
+            ResultCode.IDEMPOTENCY_KEY_REQUIRED
+        } else {
+            ResultCode.INVALID_REQUEST
+        }
+        return ResponseEntity.status(resultCode.status).body(
+            failureBody(
+                resultCode = resultCode,
+                request = request,
+                message = resultCode.message
+            )
+        )
+    }
 
     @ExceptionHandler(BusinessException::class)
     fun handleBusinessException(

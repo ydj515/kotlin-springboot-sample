@@ -158,8 +158,10 @@ class OrderControllerTest(
     }
 
     describe("POST /api/orders/{id}/pay") {
-        it("결제 성공 시 version, paidAt, paymentKey를 포함한 주문 응답을 반환한다") {
-            every { orderUseCase.payOrder(PayOrderCommand(1L)) } returns sampleOrderResult(
+        val idempotencyKey = "550e8400-e29b-41d4-a716-446655440000"
+
+        it("Idempotency-Key 헤더와 함께 호출하면 결제 성공 응답을 반환한다") {
+            every { orderUseCase.payOrder(PayOrderCommand(1L, idempotencyKey)) } returns sampleOrderResult(
                 id = 1L,
                 version = 3L,
                 status = OrderStatus.PAID,
@@ -168,17 +170,44 @@ class OrderControllerTest(
                 paymentKey = "MOCK-PG-abc123"
             )
 
-            mockMvc.post("/api/orders/1/pay")
-                .andExpect {
-                    status { isOk() }
-                    jsonPath("$.result") { value("success") }
-                    jsonPath("$.data.version") { value(3) }
-                    jsonPath("$.data.status") { value("PAID") }
-                    jsonPath("$.data.paidAt") { value("2026-05-08T12:05:00") }
-                    jsonPath("$.data.paymentKey") { value("MOCK-PG-abc123") }
-                }
+            mockMvc.post("/api/orders/1/pay") {
+                header("Idempotency-Key", idempotencyKey)
+            }.andExpect {
+                status { isOk() }
+                jsonPath("$.result") { value("success") }
+                jsonPath("$.data.version") { value(3) }
+                jsonPath("$.data.status") { value("PAID") }
+                jsonPath("$.data.paidAt") { value("2026-05-08T12:05:00") }
+                jsonPath("$.data.paymentKey") { value("MOCK-PG-abc123") }
+            }
 
-            verify { orderUseCase.payOrder(PayOrderCommand(1L)) }
+            verify { orderUseCase.payOrder(PayOrderCommand(1L, idempotencyKey)) }
+        }
+
+        it("Idempotency-Key 헤더가 누락되면 400 IDEMPOTENCY_KEY_REQUIRED를 반환한다") {
+            mockMvc.post("/api/orders/1/pay").andExpect {
+                status { isBadRequest() }
+                jsonPath("$.result") { value("failure") }
+                jsonPath("$.code") { value("IDEMPOTENCY_KEY_REQUIRED") }
+            }
+        }
+
+        it("Idempotency-Key 헤더가 빈 문자열이면 400 IDEMPOTENCY_KEY_REQUIRED를 반환한다") {
+            mockMvc.post("/api/orders/1/pay") {
+                header("Idempotency-Key", "   ")
+            }.andExpect {
+                status { isBadRequest() }
+                jsonPath("$.code") { value("IDEMPOTENCY_KEY_REQUIRED") }
+            }
+        }
+
+        it("Idempotency-Key 헤더가 255자 초과면 400 IDEMPOTENCY_KEY_INVALID를 반환한다") {
+            mockMvc.post("/api/orders/1/pay") {
+                header("Idempotency-Key", "a".repeat(256))
+            }.andExpect {
+                status { isBadRequest() }
+                jsonPath("$.code") { value("IDEMPOTENCY_KEY_INVALID") }
+            }
         }
     }
 

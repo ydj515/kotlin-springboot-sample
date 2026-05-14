@@ -23,6 +23,8 @@ import com.example.kotlinspringbootsample.config.SwaggerRefs.ORDER_PAY_SUCCESS_E
 import com.example.kotlinspringbootsample.config.SwaggerRefs.ORDER_SHIP_SUCCESS_EXAMPLE_REF
 import com.example.kotlinspringbootsample.config.SwaggerRefs.ORDER_STATUS_SUMMARY_SUCCESS_EXAMPLE_REF
 import com.example.kotlinspringbootsample.domain.order.OrderStatus
+import com.example.kotlinspringbootsample.domain.payment.exception.IdempotencyKeyInvalidException
+import com.example.kotlinspringbootsample.domain.payment.exception.IdempotencyKeyRequiredException
 import com.example.kotlinspringbootsample.presentation.common.ApiResult
 import com.example.kotlinspringbootsample.presentation.common.ResultCode
 import com.example.kotlinspringbootsample.presentation.order.request.CreateOrderRequest
@@ -45,6 +47,7 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
@@ -205,9 +208,31 @@ class OrderController(
     @PostMapping("/{id}/pay")
     fun payOrder(
         @Parameter(description = "주문 ID", example = "2")
-        @PathVariable id: Long
-    ): ApiResult.Success<OrderResponse> =
-        ApiResult.success(orderUseCase.payOrder(PayOrderCommand(id)).toResponse())
+        @PathVariable id: Long,
+        @Parameter(
+            description = "결제 멱등성 키 (클라이언트 발급 UUID 권장)",
+            example = "550e8400-e29b-41d4-a716-446655440000"
+        )
+        @RequestHeader("Idempotency-Key") idempotencyKey: String
+    ): ApiResult.Success<OrderResponse> {
+        val validatedKey = validateIdempotencyKey(idempotencyKey)
+        return ApiResult.success(orderUseCase.payOrder(PayOrderCommand(id, validatedKey)).toResponse())
+    }
+
+    private fun validateIdempotencyKey(rawKey: String): String {
+        val trimmed = rawKey.trim()
+        if (trimmed.isEmpty()) {
+            throw IdempotencyKeyRequiredException()
+        }
+        if (trimmed.length > IDEMPOTENCY_KEY_MAX_LENGTH) {
+            throw IdempotencyKeyInvalidException("idempotency key must be at most $IDEMPOTENCY_KEY_MAX_LENGTH characters")
+        }
+        return trimmed
+    }
+
+    private companion object {
+        const val IDEMPOTENCY_KEY_MAX_LENGTH = 255
+    }
 
     @Operation(summary = "주문 배송", description = "PAID 상태 주문을 SHIPPED 상태로 전이합니다.")
     @ApiResponses(

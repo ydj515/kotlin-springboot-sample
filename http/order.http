@@ -51,7 +51,19 @@ Content-Type: application/json
   ]
 }
 
-### 결제 상태 전이
+### 결제 상태 전이 (Level 2: Idempotency-Key 필수)
+POST {{host}}/api/orders/1/pay
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
+Content-Type: application/json
+
+### 결제 재요청 (같은 Idempotency-Key → replay, PG 호출 없음)
+POST {{host}}/api/orders/1/pay
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
+Content-Type: application/json
+
+### 결제 — Idempotency-Key 누락 (400 IDEMPOTENCY_KEY_REQUIRED 시연)
 POST {{host}}/api/orders/1/pay
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json

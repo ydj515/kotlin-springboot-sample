@@ -13,6 +13,12 @@ enum class ResultCode(
     NOT_FOUND(HttpStatus.NOT_FOUND, "404", "Not Found"),
     CONFLICT(HttpStatus.CONFLICT, "409", "Conflict"),
     USER_ALREADY_EXISTS(HttpStatus.CONFLICT, "USER_ALREADY_EXISTS", "user already exists"),
+    IDEMPOTENCY_KEY_REQUIRED(HttpStatus.BAD_REQUEST, "IDEMPOTENCY_KEY_REQUIRED", "Idempotency-Key header is required"),
+    IDEMPOTENCY_KEY_INVALID(HttpStatus.BAD_REQUEST, "IDEMPOTENCY_KEY_INVALID", "Idempotency-Key header has invalid format"),
+    IDEMPOTENCY_KEY_CONFLICT(HttpStatus.CONFLICT, "IDEMPOTENCY_KEY_CONFLICT", "idempotency key conflict"),
+    PAYMENT_APPROVAL_FAILED(HttpStatus.UNPROCESSABLE_ENTITY, "PAYMENT_APPROVAL_FAILED", "payment approval failed"),
+    PAYMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "PAYMENT_NOT_FOUND", "payment not found"),
+    ILLEGAL_PAYMENT_STATE_TRANSITION(HttpStatus.CONFLICT, "ILLEGAL_PAYMENT_STATE_TRANSITION", "illegal payment state transition"),
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "500", "Internal Server Error")
 
     ;
