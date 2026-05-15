@@ -1,5 +1,7 @@
 package com.example.kotlinspringbootsample.application.order
 
+import com.example.kotlinspringbootsample.application.compensation.CompensationOutcome
+import com.example.kotlinspringbootsample.application.compensation.CompensationService
 import com.example.kotlinspringbootsample.application.order.command.CancelOrderCommand
 import com.example.kotlinspringbootsample.application.order.command.CreateOrderCommand
 import com.example.kotlinspringbootsample.application.order.command.FindOrdersCommand
@@ -12,12 +14,14 @@ import com.example.kotlinspringbootsample.application.order.result.OrderResult
 import com.example.kotlinspringbootsample.application.order.result.OrderStatusSummaryResult
 import com.example.kotlinspringbootsample.application.order.result.OrderSummaryResult
 import com.example.kotlinspringbootsample.domain.customer.service.CustomerLookupService
+import com.example.kotlinspringbootsample.domain.order.Cancellation
 import com.example.kotlinspringbootsample.domain.order.Order
 import com.example.kotlinspringbootsample.domain.order.OrderLineDraft
 import com.example.kotlinspringbootsample.domain.order.OrderStatus
 import com.example.kotlinspringbootsample.domain.order.policy.OrderItemPolicy
 import com.example.kotlinspringbootsample.domain.order.policy.OrderStatusTransitionPolicy
 import com.example.kotlinspringbootsample.domain.order.event.OrderPaidEvent
+import com.example.kotlinspringbootsample.domain.order.repository.CancellationRepository
 import com.example.kotlinspringbootsample.domain.order.repository.OrderRepository
 import com.example.kotlinspringbootsample.domain.order.service.OrderLookupService
 import com.example.kotlinspringbootsample.domain.outbox.OutboxEvent
@@ -50,7 +54,9 @@ class OrderUseCase(
     private val paymentGateway: PaymentGateway,
     private val paymentRepository: PaymentRepository,
     private val outboxEventRepository: OutboxEventRepository,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper,
+    private val compensationService: CompensationService,
+    private val cancellationRepository: CancellationRepository
 ) {
     fun getOrders(command: FindOrdersCommand): Page<OrderSummaryResult> {
         val pageable = PageRequest.of(command.page, command.size, Sort.by(Sort.Direction.DESC, "createdAt"))
@@ -112,7 +118,7 @@ class OrderUseCase(
             )
         )
 
-        // 3. PG.approve 호출 (실패 시 Payment.FAILED로 기록 후 예외 재전파)
+        // 3. PG.approve 호출 — 시나리오 A (PG 실패): Payment.FAILED 기록 후 예외 재전파, 보상 불필요
         val approveResult = try {
             paymentGateway.approve(order.totalAmount, command.idempotencyKey)
         } catch (e: PaymentApprovalFailedException) {
@@ -121,13 +127,24 @@ class OrderUseCase(
             throw e
         }
 
-        // 4. 성공: Payment.APPROVED + Order.markPaid + OutboxEvent insert (모두 같은 트랜잭션)
-        payment.markApproved(approveResult.paymentKey, approveResult.approvedAt)
-        paymentRepository.save(payment)
-        order.markPaid(approveResult.approvedAt)
-        publishOrderPaidEventToOutbox(order, payment, approveResult.paymentKey, approveResult.approvedAt)
-
-        return order.toResult().copy(paymentKey = approveResult.paymentKey)
+        // 4. 시나리오 B 진입: PG approve는 성공. 여기 이후 실패는 모두 보상(자동 환불) 대상.
+        val paymentId = requireNotNull(payment.id)
+        return try {
+            payment.markApproved(approveResult.paymentKey, approveResult.approvedAt)
+            paymentRepository.save(payment)
+            order.markPaid(approveResult.approvedAt)
+            publishOrderPaidEventToOutbox(order, payment, approveResult.paymentKey, approveResult.approvedAt)
+            order.toResult().copy(paymentKey = approveResult.paymentKey)
+        } catch (e: Exception) {
+            // 메인 트랜잭션은 롤백 예정. 보상은 별도 트랜잭션(REQUIRES_NEW).
+            compensationService.compensateApprovedPayment(
+                paymentId = paymentId,
+                paymentKey = approveResult.paymentKey,
+                amount = payment.amount,
+                reason = "payOrder downstream failure: ${e.message}"
+            )
+            throw e
+        }
     }
 
     private fun publishOrderPaidEventToOutbox(
@@ -193,13 +210,69 @@ class OrderUseCase(
             .toResult()
 
     @Transactional
-    fun cancelOrder(command: CancelOrderCommand): OrderResult =
-        orderLookupService.requireById(command.id)
-            .apply {
-                orderStatusTransitionPolicy.validateCancellable(this)
-                cancel()
+    fun cancelOrder(command: CancelOrderCommand): OrderResult {
+        val order = orderLookupService.requireById(command.id)
+
+        // 1. Idempotency check
+        val existing = cancellationRepository.findByIdempotencyKey(command.idempotencyKey)
+        if (existing != null) {
+            return replayExistingCancellation(existing, order, command)
+        }
+
+        // 2. 신규 cancellation 전이 검증
+        orderStatusTransitionPolicy.validateCancellable(order)
+        val cancellation = cancellationRepository.save(
+            Cancellation.requested(
+                orderId = requireNotNull(order.id),
+                idempotencyKey = command.idempotencyKey,
+                reason = command.reason
+            )
+        )
+
+        val wasPaid = order.status == OrderStatus.PAID
+        order.cancel(reason = command.reason)
+
+        if (wasPaid) {
+            val approvedPayment = paymentRepository.findByOrderId(requireNotNull(order.id))
+                .firstOrNull { it.status == PaymentStatus.APPROVED }
+                ?: throw IllegalStateException("PAID order has no APPROVED payment: orderId=${order.id}")
+
+            val outcome = compensationService.compensateApprovedPayment(
+                paymentId = requireNotNull(approvedPayment.id),
+                paymentKey = requireNotNull(approvedPayment.paymentKey),
+                amount = approvedPayment.amount,
+                reason = "order cancel: ${command.reason ?: "user requested"}"
+            )
+            when (outcome) {
+                is CompensationOutcome.Refunded -> cancellation.markSucceeded(outcome.refundedAt)
+                is CompensationOutcome.Scheduled -> cancellation.markRefundFailed()
             }
-            .toResult()
+        } else {
+            // CREATED 상태였음 — 환불 호출 불필요, 즉시 SUCCEEDED
+            cancellation.markSucceeded(refundedAt = null)
+        }
+
+        cancellationRepository.save(cancellation)
+        return order.toResult()
+    }
+
+    private fun replayExistingCancellation(
+        existing: Cancellation,
+        order: Order,
+        command: CancelOrderCommand
+    ): OrderResult {
+        if (existing.orderId != order.id) {
+            throw IdempotencyConflictException(
+                "idempotency key already used for another order (orderId=${existing.orderId})"
+            )
+        }
+        if ((existing.reason ?: "") != (command.reason ?: "")) {
+            throw IdempotencyConflictException(
+                "idempotency key was used with a different reason (expected=${existing.reason}, requested=${command.reason})"
+            )
+        }
+        return order.toResult()
+    }
 
     private fun findOrdersByDerivedQuery(
         customerName: String?,

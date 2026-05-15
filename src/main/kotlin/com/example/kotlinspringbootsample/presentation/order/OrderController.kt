@@ -270,9 +270,20 @@ class OrderController(
     @PostMapping("/{id}/cancel")
     fun cancelOrder(
         @Parameter(description = "주문 ID", example = "2")
-        @PathVariable id: Long
-    ): ApiResult.Success<OrderResponse> =
-        ApiResult.success(orderUseCase.cancelOrder(CancelOrderCommand(id)).toResponse())
+        @PathVariable id: Long,
+        @Parameter(
+            description = "취소 멱등성 키 (클라이언트 발급 UUID 권장)",
+            example = "550e8400-e29b-41d4-a716-446655440099"
+        )
+        @RequestHeader("Idempotency-Key") idempotencyKey: String,
+        @Parameter(description = "취소 사유 (선택)", example = "단순 변심")
+        @RequestParam(required = false) reason: String?
+    ): ApiResult.Success<OrderResponse> {
+        val validatedKey = validateIdempotencyKey(idempotencyKey)
+        return ApiResult.success(
+            orderUseCase.cancelOrder(CancelOrderCommand(id, validatedKey, reason)).toResponse()
+        )
+    }
 }
 
 private fun CreateOrderRequest.toCommand(): CreateOrderCommand =
