@@ -73,7 +73,31 @@ POST {{host}}/api/orders/2/ship
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
-### 취소 상태 전이
+### 취소 (Level 5: Idempotency-Key 필수, reason 선택)
+POST {{host}}/api/orders/2/cancel?reason=단순 변심
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: 660e8400-e29b-41d4-a716-446655440099
+Content-Type: application/json
+
+### 취소 재요청 (같은 Idempotency-Key → replay, PG refund 호출 없음)
+POST {{host}}/api/orders/2/cancel?reason=단순 변심
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: 660e8400-e29b-41d4-a716-446655440099
+Content-Type: application/json
+
+### 취소 - 같은 키 + 다른 reason (409 IDEMPOTENCY_KEY_CONFLICT 시연)
+POST {{host}}/api/orders/2/cancel?reason=배송 지연
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: 660e8400-e29b-41d4-a716-446655440099
+Content-Type: application/json
+
+### 취소 - 같은 키 + 다른 order (409 IDEMPOTENCY_KEY_CONFLICT 시연)
+POST {{host}}/api/orders/1/cancel
+Authorization: Bearer {{accessToken}}
+Idempotency-Key: 660e8400-e29b-41d4-a716-446655440099
+Content-Type: application/json
+
+### 취소 - Idempotency-Key 누락 (400 IDEMPOTENCY_KEY_REQUIRED 시연)
 POST {{host}}/api/orders/4/cancel
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
