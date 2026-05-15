@@ -1,5 +1,6 @@
 package com.example.kotlinspringbootsample.application.order
 
+import com.example.kotlinspringbootsample.application.compensation.CompensationService
 import com.example.kotlinspringbootsample.application.order.command.CancelOrderCommand
 import com.example.kotlinspringbootsample.application.order.command.FindOrdersCommand
 import com.example.kotlinspringbootsample.application.order.command.FindOrderStatusSummariesCommand
@@ -14,6 +15,7 @@ import com.example.kotlinspringbootsample.domain.order.ShippingAddress
 import com.example.kotlinspringbootsample.domain.order.exception.InvalidOrderStatusTransitionException
 import com.example.kotlinspringbootsample.domain.order.policy.OrderItemPolicy
 import com.example.kotlinspringbootsample.domain.order.policy.OrderStatusTransitionPolicy
+import com.example.kotlinspringbootsample.domain.order.repository.CancellationRepository
 import com.example.kotlinspringbootsample.domain.order.repository.OrderRepository
 import com.example.kotlinspringbootsample.domain.order.repository.projection.OrderStatusSummaryProjection
 import com.example.kotlinspringbootsample.domain.order.service.OrderLookupService
@@ -52,6 +54,8 @@ class OrderUseCaseTest : BehaviorSpec({
     val paymentGateway = mockk<PaymentGateway>()
     val paymentRepository = mockk<PaymentRepository>()
     val outboxEventRepository = mockk<OutboxEventRepository>()
+    val compensationService = mockk<CompensationService>()
+    val cancellationRepository = mockk<CancellationRepository>()
     val objectMapper: ObjectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
     val orderUseCase = OrderUseCase(
         orderRepository = orderRepository,
@@ -62,13 +66,16 @@ class OrderUseCaseTest : BehaviorSpec({
         paymentGateway = paymentGateway,
         paymentRepository = paymentRepository,
         outboxEventRepository = outboxEventRepository,
-        objectMapper = objectMapper
+        objectMapper = objectMapper,
+        compensationService = compensationService,
+        cancellationRepository = cancellationRepository
     )
 
     beforeTest {
         clearMocks(
             orderRepository, customerLookupService, orderLookupService,
-            paymentGateway, paymentRepository, outboxEventRepository
+            paymentGateway, paymentRepository, outboxEventRepository,
+            compensationService, cancellationRepository
         )
     }
 
@@ -240,9 +247,10 @@ class OrderUseCaseTest : BehaviorSpec({
                 }
 
                 every { orderLookupService.requireById(3L) } returns order
+                every { cancellationRepository.findByIdempotencyKey("test-cancel-key-1") } returns null
 
                 val exception = shouldThrow<InvalidOrderStatusTransitionException> {
-                    orderUseCase.cancelOrder(CancelOrderCommand(3L))
+                    orderUseCase.cancelOrder(CancelOrderCommand(3L, "test-cancel-key-1"))
                 }
 
                 exception.message shouldBe "only created or paid orders can be cancelled. current status: SHIPPED"

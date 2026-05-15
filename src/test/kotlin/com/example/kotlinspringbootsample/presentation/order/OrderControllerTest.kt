@@ -236,20 +236,22 @@ class OrderControllerTest(
 
     describe("POST /api/orders/{id}/cancel") {
         it("상태 전이 규칙 위반이면 sealed failure 포맷으로 409를 반환한다") {
-            every { orderUseCase.cancelOrder(CancelOrderCommand(3L)) } throws
+            val cancelKey = "550e8400-e29b-41d4-a716-446655440099"
+            every { orderUseCase.cancelOrder(CancelOrderCommand(3L, cancelKey, null)) } throws
                 InvalidOrderStatusTransitionException(
                     "only created or paid orders can be cancelled. current status: SHIPPED"
                 )
 
-            mockMvc.post("/api/orders/3/cancel")
-                .andExpect {
-                    status { isConflict() }
-                    jsonPath("$.result") { value("failure") }
-                    jsonPath("$.code") { value("409") }
-                    jsonPath("$.message") { value("only created or paid orders can be cancelled. current status: SHIPPED") }
-                }
+            mockMvc.post("/api/orders/3/cancel") {
+                header("Idempotency-Key", cancelKey)
+            }.andExpect {
+                status { isConflict() }
+                jsonPath("$.result") { value("failure") }
+                jsonPath("$.code") { value("409") }
+                jsonPath("$.message") { value("only created or paid orders can be cancelled. current status: SHIPPED") }
+            }
 
-            verify { orderUseCase.cancelOrder(CancelOrderCommand(3L)) }
+            verify { orderUseCase.cancelOrder(CancelOrderCommand(3L, cancelKey, null)) }
         }
     }
 })
