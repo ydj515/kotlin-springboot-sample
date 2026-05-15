@@ -262,42 +262,141 @@
 
 ## Level 5: Compensation (saga)
 
+> **사전 확정 결정** (spec §Level 5.1~5.9 참조):
+> - 보상 트리거: **명시적 try/catch + CompensationService 호출** (TransactionSynchronization 미채택)
+> - CompensationService: **별도 빈 분리** (REQUIRES_NEW 적용 위해)
+> - CompensationRetryWorker: **SELECT FOR UPDATE SKIP LOCKED** (MySQL 통합 테스트에서만 동시성 검증)
+> - max retry 초과: **status=FAILED + log.error만** (OncallAlerter 미도입)
+> - cancel idempotency: **Level 5 안 Task 5.2.5로 통합** (cancel = 환불 trigger 수반)
+> - DB 실패 시뮬레이션: `@MockkBean` / `@MockBean`으로 Repository 강제 실패
+
 ### Task 5.1: schema
-- [ ] compensation_tasks(id, task_type, payload JSON, status, retry_count, next_attempt_at, created_at)
-- [ ] Payment.status에 `REFUND_FAILED` 추가
-- [ ] **cancellations 테이블 추가** (cancel idempotency 적용):
-  - 컬럼: id, order_id, idempotency_key (UNIQUE), reason, status (REQUESTED/SUCCEEDED/REFUND_FAILED), refunded_at, created_at
-  - cancel = 단순 상태 전이가 아니라 환불 trigger 수반하므로 멱등성 보호 필요
+- [ ] **compensation_tasks** 테이블 (양쪽):
+  - 컬럼: id PK, task_type VARCHAR(50), payload TEXT(JSON), status VARCHAR(20), retry_count INT DEFAULT 0, next_attempt_at DATETIME NOT NULL, last_error VARCHAR(1000) nullable, created_at, updated_at
+  - INDEX (status, next_attempt_at)
+- [ ] **cancellations** 테이블 (양쪽):
+  - 컬럼: id PK, order_id BIGINT NOT NULL FK→purchase_orders, idempotency_key VARCHAR(255) UNIQUE, reason VARCHAR(500), status VARCHAR(30), refunded_at DATETIME nullable, version BIGINT DEFAULT 0, created_at, updated_at
+- [ ] `Payment.status`에 `REFUND_FAILED` enum 값 추가 (도메인 + 전이 매트릭스)
+- [ ] 양쪽 test schema sql 갱신: order-schema.sql/payment-schema.sql 상단 DROP에 새 테이블 추가
+- [ ] kotlin: JPA `@Entity` 추가로 자동 생성. java-mybatis: `db/mysql/compensation-schema.sql`, `db/mysql/cancellation-schema.sql` 신규
+- [ ] `init_data.sql` (java-mybatis)에도 새 테이블 DDL 반영
 
-### Task 5.2: payOrder 보상 트랜잭션
-- [ ] try/catch 구조:
-  - PG.approve 성공 → Payment.markApproved + ... 시도
-  - DB 실패 catch → 별도 트랜잭션(REQUIRES_NEW)으로 PG.refund 호출
-  - refund 성공 → Payment.markRefunded + history
-  - refund 실패 → CompensationTask insert (task_type=PG_REFUND)
+### Task 5.2: Payment.markRefunded / markRefundFailed 도메인 메서드 추가
+- [ ] `Payment.markRefunded(refundedAt, reason)`: APPROVED 또는 REFUND_FAILED → REFUNDED (Level 5 retry 성공 케이스 포함)
+- [ ] `Payment.markRefundFailed(reason, occurredAt)`: APPROVED → REFUND_FAILED
+- [ ] PaymentHistory 자동 누적 동일 패턴
+- [ ] 전이 매트릭스 위반 시 `IllegalPaymentStateTransitionException`
 
-### Task 5.2.5: cancelOrder idempotency 적용
-- [ ] controller에 `@RequestHeader("Idempotency-Key", required = true) String idempotencyKey` 추가
-- [ ] 흐름:
-  - 같은 키 + 같은 order → 기존 cancellation 결과 replay
-  - 같은 키 + 다른 order → IdempotencyConflictException (409)
-  - 신규 → cancellations insert + Order 상태 전이 + (이미 PAID였다면 PG.refund 호출)
-- [ ] 미적용: ship, create (optimistic lock으로 충분)
-- [ ] 통합 테스트: replay / 다른 order conflict / 키 누락 400
+### Task 5.3: CompensationTask aggregate + repository
+**Files (kotlin):**
+- Create: `domain/compensation/CompensationTask.kt`, `CompensationTaskType.kt` (enum: PG_REFUND), `CompensationTaskStatus.kt`
+- Create: `domain/compensation/repository/CompensationTaskRepository.kt`
+- Create: `domain/compensation/exception/CompensationTaskNotFoundException.kt`
 
-### Task 5.3: CompensationRetryWorker
-- [ ] `@Scheduled` 1초 polling
-- [ ] PENDING task SELECT FOR UPDATE SKIP LOCKED
-- [ ] task_type에 따라 처리 (PG_REFUND → PG.refund 호출)
-- [ ] 실패 시 retry_count++ + next_attempt_at = exp_backoff
-- [ ] max retry 초과 시 status=FAILED
+**Files (java-mybatis):**
+- Create: 위와 동일 (java)
+- Create: `infrastructure/compensation/CompensationTaskMapper.java`, `CompensationTaskMapperRepositoryAdapter.java`
+- Create: `mapper/compensation/CompensationTaskMapper.xml`
 
-### Task 5.4: 통합 테스트
-- [ ] PG approve 성공 → DB save 강제 실패 → refund 호출 확인
-- [ ] refund 실패 → CompensationTask 생성 확인
-- [ ] CompensationRetryWorker 실행 후 task status=SUCCESS 확인
+- [ ] **Step 1: CompensationTask 도메인 클래스** — id, taskType, payload, status, retryCount, nextAttemptAt, lastError. 도메인 메서드: `markSuccess`, `markRetry(error, nextAttemptAt)`, `markFailed(error)`, `pending(taskType, payload)` factory
+- [ ] **Step 2: Repository port** — `save`, `findById`, `findPendingForUpdate(now, limit)` (SKIP LOCKED), `findByStatus`
+- [ ] **Step 3: kotlin: `@Query(nativeQuery=true)` SKIP LOCKED 쿼리**
+- [ ] **Step 4: java-mybatis: `<select>` raw SQL + adapter**
+- [ ] **Step 5: 단위 테스트** — 도메인 전이 검증
 
-### Task 5.5: Level 5 commit & verify
+### Task 5.4: Cancellation aggregate + repository
+**Files (kotlin):**
+- Create: `domain/order/Cancellation.kt`, `CancellationStatus.kt`
+- Create: `domain/order/repository/CancellationRepository.kt`
+
+**Files (java-mybatis):**
+- Create: 위와 동일 (java)
+- Create: `infrastructure/order/CancellationMapper.java`, `CancellationMapperRepositoryAdapter.java`
+- Create: `mapper/order/CancellationMapper.xml`
+
+- [ ] **Step 1: Cancellation 도메인 클래스** — id, orderId, idempotencyKey, reason, status, refundedAt, version. 도메인 메서드: `markSucceeded(refundedAt)`, `markRefundFailed(reason)`, `requested(orderId, key, reason)` factory
+- [ ] **Step 2: Repository port** — `save`, `findByIdempotencyKey(key): Cancellation?` (replay/conflict 검증), `findByOrderId`
+- [ ] **Step 3: 단위 테스트**
+
+### Task 5.5: CompensationService 빈 (양쪽)
+**Files (kotlin):**
+- Create: `application/compensation/CompensationService.kt`
+
+**Files (java-mybatis):**
+- Create: `application/compensation/CompensationService.java`
+
+- [ ] **Step 1: `@Service` 클래스 정의** — 주입: `PaymentRepository`, `PaymentGateway`, `CompensationTaskRepository`, `ObjectMapper`
+- [ ] **Step 2: `compensateApprovedPayment(paymentId, paymentKey, amount, reason)` 메서드**
+  - `@Transactional(propagation = REQUIRES_NEW)`
+  - try { PG.refund 호출 → Payment.markRefunded → save } catch { Payment.markRefundFailed → save → CompensationTask.pending(PG_REFUND, payload).save }
+- [ ] **Step 3: `processCompensationTask(task)` 메서드**
+  - `@Transactional(propagation = REQUIRES_NEW)`
+  - PG_REFUND task: payload deserialization → PG.refund 시도 → 성공 시 task.markSuccess + Payment.markRefunded / 실패 시 task.markRetry(error, exp_backoff) 또는 max retry 초과 시 task.markFailed + log.error
+- [ ] **Step 4: 단위 테스트** — PG mock으로 4가지 케이스 검증 (refund 성공/실패, retry 성공/실패)
+
+### Task 5.6: OrderUseCase.payOrder 보상 trigger 통합
+- [ ] **Step 1: `CompensationService` 주입**
+- [ ] **Step 2: 외부 try (PG.approve)** — `PaymentApprovalFailedException`만 catch → Payment.markFailed → throw (시나리오 A)
+- [ ] **Step 3: 내부 try (Payment.markApproved 이후 모든 DB 작업)** — Exception catch → `compensationService.compensateApprovedPayment(...)` 호출 후 re-throw (시나리오 B)
+- [ ] **Step 4: 단위 테스트** — DB 실패 mock으로 시나리오 B 흐름 검증
+- [ ] **Step 5: 통합 테스트 (MySQL)** — `@MockkBean OrderRepository` 강제 실패 → 메인 트랜잭션 롤백 + compensation REQUIRES_NEW 별도 commit 확인 (Payment.REFUNDED 또는 REFUND_FAILED + CompensationTask PENDING)
+
+### Task 5.7: OrderUseCase.cancelOrder + idempotency
+- [ ] **Step 1: `CancelOrderCommand`에 `idempotencyKey`, `reason` 필드 추가**
+- [ ] **Step 2: cancelOrder 흐름**
+  1. `cancellationRepository.findByIdempotencyKey(key)` → 존재 시 같은 order/reason 검증 → replay 또는 409
+  2. 신규 → `Cancellation.requested(...).save`
+  3. `Order.markCancelled` + save (정책 검증: SHIPPED 등 차단)
+  4. 이전에 PAID였다면 → `compensationService.compensateApprovedPayment(...)` 호출 (REQUIRES_NEW)
+     - 성공: cancellation.markSucceeded
+     - 실패: cancellation.markRefundFailed (CompensationTask는 compensateApprovedPayment 안에서 이미 등록됨)
+  5. CREATED 상태였다면 환불 호출 없이 cancellation.markSucceeded
+- [ ] **Step 3: controller에 `@RequestHeader("Idempotency-Key", required = true)` 추가**
+  - 누락 → `IDEMPOTENCY_KEY_REQUIRED` 400 (pay와 동일 흐름)
+  - 빈 문자열/255자 초과 → `IDEMPOTENCY_KEY_INVALID` 400
+- [ ] **Step 4: 통합 테스트**
+  - 신규 cancel(PAID) → refund 성공 → Order.CANCELLED + Payment.REFUNDED + cancellation.SUCCEEDED
+  - replay (같은 키) → 200 OK, refund 재호출 없음
+  - 다른 order 같은 키 → 409
+  - 키 누락 → 400
+  - cancel(CREATED) → refund 호출 없음
+- [ ] **Step 5: http 파일에 `/cancel` 요청 + Idempotency-Key 헤더 갱신**
+
+### Task 5.8: CompensationRetryWorker
+**Files (kotlin):**
+- Create: `infrastructure/compensation/CompensationRetryWorker.kt`
+
+**Files (java-mybatis):**
+- Create: `infrastructure/compensation/CompensationRetryWorker.java`
+
+- [ ] **Step 1: `@Component @Scheduled(fixedDelayString = "${app.compensation.worker.fixed-delay-ms:1000}")`**
+- [ ] **Step 2: BATCH_SIZE=10, MAX_RETRY=3, exp backoff (2^n초, max 60s)**
+- [ ] **Step 3: `findPendingForUpdate(LocalDateTime.now(), BATCH_SIZE)` → 각 task에 대해 `compensationService.processCompensationTask(task)` 호출**
+- [ ] **Step 4: `application.yml`/`application-sample.yml`에 `app.compensation.worker.fixed-delay-ms` 기본값 추가**
+- [ ] **Step 5: 단위 테스트** — worker가 PENDING task만 가져오는지, processCompensationTask 호출되는지
+
+### Task 5.9: 통합 테스트 (MySQL)
+- [ ] **시나리오 A (PG approve 실패)**: PG mock 실패 → Payment.FAILED + 보상 호출 안 됨
+- [ ] **시나리오 B-1 (refund 성공)**: PG approve 성공 + Repository 강제 실패 → refund 호출 → Payment.REFUNDED + CompensationTask 없음
+- [ ] **시나리오 B-2 (refund 실패)**: PG approve 성공 + Repository 실패 + PG refund 실패 → Payment.REFUND_FAILED + CompensationTask PENDING 1건
+- [ ] **시나리오 C-1 (cancel PAID, refund 성공)**: PAID 상태에서 cancel → Order.CANCELLED + Payment.REFUNDED
+- [ ] **시나리오 C-2 (cancel PAID, refund 실패)**: PAID 상태에서 cancel + refund 실패 → Order.CANCELLED + cancellation.REFUND_FAILED + CompensationTask PENDING
+- [ ] **시나리오 D (cancel CREATED)**: CREATED에서 cancel → Order.CANCELLED, refund 호출 안 됨
+- [ ] **Worker retry success**: PENDING task가 PG refund 성공 → task.SUCCESS + Payment.REFUNDED
+- [ ] **Worker max retry exceeded**: PG refund 3회 모두 실패 → task.FAILED + log.error 확인
+- [ ] **cancel idempotency 4 케이스**: 신규/replay/다른 order conflict/키 누락 400
+
+### Task 5.10: Level 5 commit & verify
+- [ ] task별 분리 commit (양쪽):
+  1. `chore: add compensation/cancellation schemas and payment REFUND_FAILED status`
+  2. `feat: add CompensationTask and Cancellation aggregates`
+  3. `feat: add CompensationService for payment refund saga`
+  4. `feat: wire payOrder compensation via try/catch`
+  5. `feat: add cancelOrder idempotency with cancellation aggregate`
+  6. `feat: add CompensationRetryWorker for PG refund retries`
+  7. `test: cover payment saga scenarios A through D plus worker retries`
+- [ ] 양쪽 full build/test 통과
+- [ ] push origin/main
 
 ---
 
@@ -318,9 +417,9 @@
 - Level 2: 양쪽 각 5~6개 (가장 큼)
 - Level 3: 양쪽 각 4~5개
 - Level 4: 양쪽 각 3~4개
-- Level 5: 양쪽 각 4~5개
+- Level 5: 양쪽 각 7개 (schema / aggregates / CompensationService / payOrder wiring / cancel idempotency / RetryWorker / tests)
 
-**총 약 50~60개 commit 예상.**
+**총 약 60~70개 commit 예상.**
 
 ---
 

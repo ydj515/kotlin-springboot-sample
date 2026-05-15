@@ -156,22 +156,179 @@
 ### Level 5: Compensation (saga)
 
 **범위**
-- 시나리오: PG.approve 성공 → DB save 실패 → 자동 PG.refund 호출
-  - Spring TransactionSynchronization의 `afterCompletion(STATUS_ROLLED_BACK)` 활용
-  - 또는 명시적 try/catch + 보상 호출
-- `compensation_tasks` 테이블
-  - 컬럼: id, task_type (PG_REFUND/ORDER_CANCEL_FAIL_RECORD), payload (JSON), status (PENDING/SUCCESS/FAILED), retry_count, next_attempt_at, created_at
-- 환불 호출도 실패하면 `compensation_tasks`에 task 저장 → 별도 retry worker(`@Scheduled`)가 재시도
-- Payment 상태에 `REFUND_FAILED` 추가 (운영자 개입 대상 표시)
+- 시나리오 A (PG approve 실패): `Payment.markFailed` → 보상 불필요
+- 시나리오 B (PG approve 성공 → DB 실패): 자동 PG.refund 시도 → 성공 시 `Payment.REFUNDED` / 실패 시 `CompensationTask` 등록 + `Payment.REFUND_FAILED`
+- 시나리오 C (cancel on PAID order): PG.refund 호출 → 성공 시 `Payment.REFUNDED` + `Order.CANCELLED` / 실패 시 동일 보상 패턴
+- 시나리오 D (cancel on CREATED, 미결제): refund 호출 없음 → `Order.CANCELLED`만
+- 신규 테이블: `compensation_tasks`, `cancellations`
+- 신규 클래스: `CompensationService` (보상 트랜잭션 전담), `CompensationRetryWorker` (`@Scheduled`)
+- `Payment.REFUND_FAILED` 상태 추가
 
 **왜 이 범위인가**
 - 분산 시스템 일관성 문제의 현실적 해법
 - "결제 성공했는데 우리 DB는 모르는" 운영 사고의 해소 패턴
+- cancel = 단순 상태 전이가 아니라 환불(=PG 외부 호출)을 동반 → Level 5에서 idempotency까지 함께 도입이 자연스러움
 
-**핵심 결정**
-- 보상 트리거: `try/catch + compensation 등록` 방식 (가장 명시적)
-- 최대 retry: 3회, 지수 백오프
-- 학습용 단순화: retry worker 1초 폴링, DLQ 분리는 생략 (compensation_tasks의 status=FAILED가 DLQ 역할)
+---
+
+#### 5.1 보상 트리거 메커니즘 — 명시적 try/catch 채택
+
+| 옵션 | 채택? | 이유 |
+|---|---|---|
+| try/catch + 명시적 `CompensationService` 호출 | **채택** | 흐름 명시적/테스트 용이/디버깅 명확 |
+| `TransactionSynchronization.afterCompletion(STATUS_ROLLED_BACK)` | 거부 | 트랜잭션 시스템 hook은 마법 같음. 학습용으로는 흐름이 숨겨져 부적합 |
+| `ApplicationEventPublisher.publishEvent` + listener에서 보상 | 거부 | 트랜잭션 롤백 시 정상 발행되지 않거나 `AFTER_ROLLBACK` phase로만 가능 → 흐름 추적 어려움 |
+
+**구현 패턴** (`OrderUseCase.payOrder` 내부):
+
+```kotlin
+val payment = paymentRepository.save(Payment.newRequested(orderId, key, amount))
+val approveResult = try {
+    paymentGateway.approve(payment.amount, key)
+} catch (e: PaymentApprovalFailedException) {
+    payment.markFailed(reason = e.message)
+    paymentRepository.save(payment)
+    throw e  // 시나리오 A — 보상 불필요
+}
+
+// 시나리오 B 진입: 여기 이후 실패는 모두 보상 대상
+try {
+    payment.markApproved(approveResult.paymentKey, approveResult.approvedAt)
+    paymentRepository.save(payment)
+    order.markPaid(approveResult.approvedAt)
+    orderRepository.save(order)
+    publishOrderPaidEventToOutbox(order, payment)
+    return OrderResult.from(order, payment)
+} catch (e: Exception) {
+    // 메인 트랜잭션은 롤백 예정. 보상은 별도 트랜잭션으로.
+    compensationService.compensateApprovedPayment(
+        paymentId = payment.id!!,
+        paymentKey = approveResult.paymentKey,
+        amount = payment.amount,
+        reason = "payOrder downstream failure: ${e.message}"
+    )
+    throw e
+}
+```
+
+#### 5.2 CompensationService 별도 클래스 분리
+
+`OrderUseCase`는 Facade 역할 유지. 보상 트랜잭션 자체는 별도 `@Service CompensationService`에 위임.
+
+| 메서드 | propagation | 책임 |
+|---|---|---|
+| `compensateApprovedPayment(paymentId, paymentKey, amount, reason)` | `REQUIRES_NEW` | PG.refund 호출 → 성공 시 `Payment.markRefunded` / 실패 시 `Payment.markRefundFailed` + `CompensationTask` insert |
+| `processCompensationTask(task)` | `REQUIRES_NEW` | `CompensationRetryWorker`가 호출. `PG_REFUND` task 재시도. 성공 시 task SUCCESS + Payment.REFUNDED / 실패 시 retry_count++ |
+
+**근거**:
+- Spring `@Transactional(REQUIRES_NEW)`은 self-invocation으로 작동하지 않음 → 별도 빈 분리 필수
+- 책임 분리: `OrderUseCase`는 정상 흐름 + 보상 trigger, `CompensationService`는 보상 자체
+- 테스트: PG mock + spy/mocked repository로 시나리오 B 단위 검증 가능
+
+#### 5.3 CompensationRetryWorker — SKIP LOCKED 채택
+
+`OutboxPublisher`와 동일 패턴 (`SELECT ... FOR UPDATE SKIP LOCKED`):
+
+- 동시 worker 인스턴스 가정 (학습 일관성). 단일 인스턴스 운영 시도 같은 코드로 안전
+- H2 단위 테스트: syntax만 통과(MODE=MySQL 의존). 실제 동시성 검증은 MySQL 통합 테스트에서만
+- 폴링 간격: `app.compensation.worker.fixed-delay-ms` (기본 1000ms)
+- BATCH_SIZE = 10
+- MAX_RETRY = 3, exp backoff `2^n` 초 (최대 60초)
+
+#### 5.4 Max retry 초과 처리 — status=FAILED만 (학습 범위)
+
+`compensation_tasks.status = FAILED` 전이 + `log.error` 출력으로 종결.
+
+- DLQ 분리 테이블: 만들지 않음 — `status=FAILED`가 DLQ 역할
+- 운영자 개입 시: 수동으로 `status=PENDING + retry_count=0`으로 갱신 → worker가 재처리
+- 운영 알림: `OncallAlerter` 같은 인터페이스 + Slack/Email integration은 **본 샘플 범위 외**. 후속 학습 과제 (운영 고려사항 섹션 참조)
+
+#### 5.5 시나리오별 Payment / Order / CompensationTask 상태 매트릭스
+
+| 시나리오 | Payment.status 종결 | Order.status 종결 | CompensationTask | 후속 |
+|---|---|---|---|---|
+| A. PG approve 실패 | FAILED | (변경 없음) | 없음 | 클라이언트 재요청은 **새 Idempotency-Key + 새 Payment** |
+| B-1. approve 성공, DB 실패, refund 성공 | REFUNDED | (변경 없음, 메인 롤백) | 없음 | 클라이언트는 5xx 받음. payOrder 재요청은 새 키로 |
+| B-2. approve 성공, DB 실패, refund 실패 | REFUND_FAILED | (변경 없음) | PG_REFUND PENDING | Worker 재시도. 성공 시 REFUNDED, max retry 초과 시 task FAILED |
+| C-1. cancel(PAID), refund 성공 | REFUNDED | CANCELLED | 없음 | cancellation.status=SUCCEEDED |
+| C-2. cancel(PAID), refund 실패 | REFUND_FAILED | CANCELLED | PG_REFUND PENDING | cancellation.status=REFUND_FAILED. Worker 재시도 |
+| D. cancel(CREATED, 미결제) | (해당 Payment 없음) | CANCELLED | 없음 | refund 호출 안 함 |
+
+#### 5.6 cancellations 테이블 schema
+
+```
+cancellations
+├── id (PK, AUTO_INCREMENT)
+├── order_id BIGINT NOT NULL FK→purchase_orders(id)
+├── idempotency_key VARCHAR(255) UNIQUE
+├── reason VARCHAR(500) nullable
+├── status VARCHAR(30) NOT NULL — REQUESTED / SUCCEEDED / REFUND_FAILED
+├── refunded_at DATETIME nullable — 환불 성공 시점 (C-1 / C-2 retry 성공)
+├── version BIGINT NOT NULL DEFAULT 0
+├── created_at, updated_at
+```
+
+- replay: 같은 key + 같은 order → 기존 cancellation 결과 그대로 반환
+- conflict: 같은 key + 다른 order → `IdempotencyConflictException` (409)
+- conflict: 같은 key + 같은 order + 다른 reason → `IdempotencyConflictException` (Stripe 변형. 본질 필드 변조 차단)
+
+#### 5.7 compensation_tasks 테이블 schema
+
+```
+compensation_tasks
+├── id (PK, AUTO_INCREMENT)
+├── task_type VARCHAR(50) NOT NULL — PG_REFUND (현재 단일, 확장 가능)
+├── payload TEXT/CLOB NOT NULL — JSON: {"paymentId":..,"paymentKey":..,"amount":..,"reason":..}
+├── status VARCHAR(20) NOT NULL — PENDING / SUCCESS / FAILED
+├── retry_count INT NOT NULL DEFAULT 0
+├── next_attempt_at DATETIME NOT NULL
+├── last_error VARCHAR(1000) nullable
+├── created_at, updated_at
+└── INDEX (status, next_attempt_at) — worker 조회 최적화
+```
+
+- `task_type` enum 확장 여지: `SMS_RETRY`, `ORDER_CLEANUP` 등. 현 학습 범위는 `PG_REFUND`만
+
+#### 5.8 트랜잭션 경계 (Level 5 추가분 포함 정리)
+
+| 호출 | propagation | 비고 |
+|---|---|---|
+| `OrderUseCase.payOrder` | Required (메인) | DB 실패 시 롤백. PG approve 성공이면 보상 trigger 후 throw |
+| `OrderUseCase.cancelOrder` | Required (메인) | cancellation insert + Order 전이. 환불 호출은 `CompensationService.compensateApprovedPayment` 위임 (REQUIRES_NEW) |
+| `CompensationService.compensateApprovedPayment` | REQUIRES_NEW | 메인 롤백과 독립. PG.refund + Payment 상태 전이 + 실패 시 CompensationTask insert |
+| `CompensationService.processCompensationTask` | REQUIRES_NEW | Worker가 호출. task 단위 1트랜잭션 |
+| `OutboxPublisher.publish` (배치 단위) | REQUIRES_NEW | (Level 3 기존) |
+| `OrderPaidEventListener.handle` | REQUIRES_NEW | (Level 4 기존) |
+
+#### 5.9 테스트 전략 — DB 실패 시뮬레이션
+
+**kotlin (Kotest + MockK)**:
+```kotlin
+@MockkBean lateinit var orderRepository: OrderRepository
+every { orderRepository.save(any()) } throws DataAccessException("simulated")
+
+shouldThrow<DataAccessException> { orderUseCase.payOrder(command) }
+
+// 검증
+verify { paymentGateway.refund(approveResult.paymentKey, amount) }
+val payment = paymentRepository.findByIdempotencyKey(key)!!
+payment.status shouldBe PaymentStatus.REFUNDED
+```
+
+**java-mybatis (JUnit 5 + Mockito)**:
+```java
+@MockBean OrderMapper orderMapper;
+when(orderMapper.updateStatusToPaid(...)).thenThrow(new DataAccessException("simulated") {});
+
+assertThatThrownBy(() -> orderUseCase.pay(orderId, key))
+    .isInstanceOf(DataAccessException.class);
+
+verify(paymentGateway).refund(approveResult.paymentKey(), amount);
+Payment payment = paymentRepository.findByIdempotencyKey(key).orElseThrow();
+assertThat(payment.getStatus()).isEqualTo(PaymentStatus.REFUNDED);
+```
+
+refund도 mock으로 실패시키면 `compensation_tasks` PENDING 레코드 1건이 별도 트랜잭션으로 저장됐는지 확인 (REQUIRES_NEW가 메인 롤백과 독립 commit하는지 검증).
 
 ## 두 샘플의 비교 포인트
 
@@ -184,6 +341,8 @@
 | ApplicationEventPublisher 사용 | 동일 | 동일 |
 | 도메인 이벤트 정의 | Kotlin data class | Java record |
 | compensation_tasks 처리 | JpaRepository + custom update | Mapper + update xml |
+| cancellation 저장 | JpaRepository | Mapper + xml |
+| CompensationService 빈 분리 | 동일 (`@Service`) | 동일 |
 | Facade(UseCase) 시그니처 | 동일 | 동일 |
 | Transaction propagation | 동일 (`@Transactional(REQUIRES_NEW)` 등) | 동일 |
 
@@ -358,7 +517,15 @@ ProcessedEvent (PK: eventId + consumerName)
 CompensationTask
 ├── id, taskType, payload (JSON)
 ├── status: PENDING → SUCCESS → FAILED
-├── retryCount, nextAttemptAt, createdAt
+├── retryCount, nextAttemptAt, lastError, createdAt, updatedAt
+```
+
+### Cancellation (Level 5~)
+```
+Cancellation
+├── id, orderId, idempotencyKey (UNIQUE), reason
+├── status: REQUESTED → SUCCEEDED / REFUND_FAILED
+├── refundedAt, version, createdAt, updatedAt
 ```
 
 ## 도메인 이벤트
@@ -421,9 +588,11 @@ CompensationTask
 
 ## 운영 고려사항
 
-- `outbox_events`, `payment_histories`, `compensation_tasks`, `processed_events` 모두 성장 가능 → 실제 운영 시 partition/archival 정책 필요. 학습 샘플은 무한 성장 허용.
+- `outbox_events`, `payment_histories`, `compensation_tasks`, `cancellations`, `processed_events` 모두 성장 가능 → 실제 운영 시 partition/archival 정책 필요. 학습 샘플은 무한 성장 허용.
 - `OutboxPublisher`와 `CompensationRetryWorker`는 각각 `@Scheduled` 사용 → `@EnableScheduling` 필요
 - 동시 publisher 인스턴스 가정: `FOR UPDATE SKIP LOCKED`로 안전. 학습 샘플은 단일 인스턴스 가정도 OK.
+- **OncallAlerter (후속 학습 과제)**: compensation_tasks가 max retry 초과로 `FAILED`로 전이될 때, 실제 운영에서는 oncall 엔지니어에게 알림이 가야 함 (Slack/PagerDuty/Email). 본 샘플은 `log.error`만 출력하며, `OncallAlerter` 같은 domain port + Slack adapter는 도입하지 않음. 도입 시 권장 위치: `CompensationService.processCompensationTask` 안에서 max retry 도달 직후 호출.
+- **CompensationTask payload 변조 방지**: 학습 샘플은 JSON 평문 저장. 운영에서는 schema versioning(`payload_version` 컬럼) + 역직렬화 실패 시 task 자체 FAILED 전환 정책 필요.
 
 ## 회피해야 할 함정
 
