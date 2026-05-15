@@ -17,14 +17,18 @@ import com.example.kotlinspringbootsample.domain.order.OrderLineDraft
 import com.example.kotlinspringbootsample.domain.order.OrderStatus
 import com.example.kotlinspringbootsample.domain.order.policy.OrderItemPolicy
 import com.example.kotlinspringbootsample.domain.order.policy.OrderStatusTransitionPolicy
+import com.example.kotlinspringbootsample.domain.order.event.OrderPaidEvent
 import com.example.kotlinspringbootsample.domain.order.repository.OrderRepository
 import com.example.kotlinspringbootsample.domain.order.service.OrderLookupService
+import com.example.kotlinspringbootsample.domain.outbox.OutboxEvent
+import com.example.kotlinspringbootsample.domain.outbox.repository.OutboxEventRepository
 import com.example.kotlinspringbootsample.domain.payment.Payment
 import com.example.kotlinspringbootsample.domain.payment.PaymentStatus
 import com.example.kotlinspringbootsample.domain.payment.exception.IdempotencyConflictException
 import com.example.kotlinspringbootsample.domain.payment.exception.PaymentApprovalFailedException
 import com.example.kotlinspringbootsample.domain.payment.gateway.PaymentGateway
 import com.example.kotlinspringbootsample.domain.payment.repository.PaymentRepository
+import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
@@ -44,7 +48,9 @@ class OrderUseCase(
     private val orderItemPolicy: OrderItemPolicy,
     private val orderStatusTransitionPolicy: OrderStatusTransitionPolicy,
     private val paymentGateway: PaymentGateway,
-    private val paymentRepository: PaymentRepository
+    private val paymentRepository: PaymentRepository,
+    private val outboxEventRepository: OutboxEventRepository,
+    private val objectMapper: ObjectMapper
 ) {
     fun getOrders(command: FindOrdersCommand): Page<OrderSummaryResult> {
         val pageable = PageRequest.of(command.page, command.size, Sort.by(Sort.Direction.DESC, "createdAt"))
@@ -115,12 +121,37 @@ class OrderUseCase(
             throw e
         }
 
-        // 4. 성공: Payment.APPROVED + Order.markPaid
+        // 4. 성공: Payment.APPROVED + Order.markPaid + OutboxEvent insert (모두 같은 트랜잭션)
         payment.markApproved(approveResult.paymentKey, approveResult.approvedAt)
         paymentRepository.save(payment)
         order.markPaid(approveResult.approvedAt)
+        publishOrderPaidEventToOutbox(order, payment, approveResult.paymentKey, approveResult.approvedAt)
 
         return order.toResult().copy(paymentKey = approveResult.paymentKey)
+    }
+
+    private fun publishOrderPaidEventToOutbox(
+        order: Order,
+        payment: Payment,
+        paymentKey: String,
+        paidAt: java.time.LocalDateTime
+    ) {
+        val event = OrderPaidEvent(
+            eventId = UUID.randomUUID().toString(),
+            orderId = requireNotNull(order.id),
+            paymentId = requireNotNull(payment.id),
+            paymentKey = paymentKey,
+            amount = payment.amount,
+            paidAt = paidAt
+        )
+        outboxEventRepository.save(
+            OutboxEvent.pending(
+                aggregateType = OrderPaidEvent.AGGREGATE_TYPE,
+                aggregateId = event.orderId.toString(),
+                eventType = OrderPaidEvent.EVENT_TYPE,
+                payload = objectMapper.writeValueAsString(event)
+            )
+        )
     }
 
     private fun replayExistingPayment(

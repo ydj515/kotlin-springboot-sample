@@ -17,6 +17,8 @@ import com.example.kotlinspringbootsample.domain.order.policy.OrderStatusTransit
 import com.example.kotlinspringbootsample.domain.order.repository.OrderRepository
 import com.example.kotlinspringbootsample.domain.order.repository.projection.OrderStatusSummaryProjection
 import com.example.kotlinspringbootsample.domain.order.service.OrderLookupService
+import com.example.kotlinspringbootsample.domain.outbox.OutboxEvent
+import com.example.kotlinspringbootsample.domain.outbox.repository.OutboxEventRepository
 import com.example.kotlinspringbootsample.domain.payment.Payment
 import com.example.kotlinspringbootsample.domain.payment.PaymentStatus
 import com.example.kotlinspringbootsample.domain.payment.exception.IdempotencyConflictException
@@ -24,6 +26,9 @@ import com.example.kotlinspringbootsample.domain.payment.exception.PaymentApprov
 import com.example.kotlinspringbootsample.domain.payment.gateway.ApproveResult
 import com.example.kotlinspringbootsample.domain.payment.gateway.PaymentGateway
 import com.example.kotlinspringbootsample.domain.payment.repository.PaymentRepository
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.collections.shouldHaveSize
@@ -46,6 +51,8 @@ class OrderUseCaseTest : BehaviorSpec({
     val orderLookupService = mockk<OrderLookupService>()
     val paymentGateway = mockk<PaymentGateway>()
     val paymentRepository = mockk<PaymentRepository>()
+    val outboxEventRepository = mockk<OutboxEventRepository>()
+    val objectMapper: ObjectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
     val orderUseCase = OrderUseCase(
         orderRepository = orderRepository,
         customerLookupService = customerLookupService,
@@ -53,26 +60,36 @@ class OrderUseCaseTest : BehaviorSpec({
         orderItemPolicy = OrderItemPolicy(),
         orderStatusTransitionPolicy = OrderStatusTransitionPolicy(),
         paymentGateway = paymentGateway,
-        paymentRepository = paymentRepository
+        paymentRepository = paymentRepository,
+        outboxEventRepository = outboxEventRepository,
+        objectMapper = objectMapper
     )
 
     beforeTest {
-        clearMocks(orderRepository, customerLookupService, orderLookupService, paymentGateway, paymentRepository)
+        clearMocks(
+            orderRepository, customerLookupService, orderLookupService,
+            paymentGateway, paymentRepository, outboxEventRepository
+        )
     }
 
     Given("주문 결제 요청이 들어오면") {
         val idempotencyKey = "550e8400-e29b-41d4-a716-446655440000"
 
         When("idempotencyKey가 신규이고 주문이 CREATED 상태면") {
-            Then("Payment.REQUESTED 저장 → PG approve → Payment.APPROVED + Order.markPaid 흐름이 수행된다") {
+            Then("Payment.REQUESTED 저장 → PG approve → Payment.APPROVED + Order.markPaid + OutboxEvent insert 흐름이 수행된다") {
                 val order = sampleOrder(id = 1L)
                 val approvedAt = LocalDateTime.of(2026, 5, 8, 10, 0)
 
                 every { orderLookupService.requireById(1L) } returns order
                 every { paymentRepository.findByIdempotencyKey(idempotencyKey) } returns null
-                every { paymentRepository.save(any<Payment>()) } answers { firstArg() }
+                every { paymentRepository.save(any<Payment>()) } answers {
+                    val p = firstArg<Payment>()
+                    if (p.id == null) p.id = 99L
+                    p
+                }
                 every { paymentGateway.approve(order.totalAmount, idempotencyKey) } returns
                     ApproveResult(paymentKey = "MOCK-PG-test-key", approvedAt = approvedAt)
+                every { outboxEventRepository.save(any<OutboxEvent>()) } answers { firstArg() }
 
                 val result = orderUseCase.payOrder(PayOrderCommand(1L, idempotencyKey))
 
@@ -82,6 +99,7 @@ class OrderUseCaseTest : BehaviorSpec({
                 verify(exactly = 1) { paymentRepository.findByIdempotencyKey(idempotencyKey) }
                 verify(exactly = 2) { paymentRepository.save(any<Payment>()) } // REQUESTED + APPROVED
                 verify(exactly = 1) { paymentGateway.approve(order.totalAmount, idempotencyKey) }
+                verify(exactly = 1) { outboxEventRepository.save(any<OutboxEvent>()) }
             }
         }
 
