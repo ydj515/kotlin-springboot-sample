@@ -249,10 +249,15 @@ try {
 |---|---|---|---|---|
 | A. PG approve 실패 | FAILED | (변경 없음) | 없음 | 클라이언트 재요청은 **새 Idempotency-Key + 새 Payment** |
 | B-1. approve 성공, DB 실패, refund 성공 | REFUNDED | (변경 없음, 메인 롤백) | 없음 | 클라이언트는 5xx 받음. payOrder 재요청은 새 키로 |
-| B-2. approve 성공, DB 실패, refund 실패 | REFUND_FAILED | (변경 없음) | PG_REFUND PENDING | Worker 재시도. 성공 시 REFUNDED, max retry 초과 시 task FAILED |
+| B-2. approve 성공, DB 실패, refund 실패 | REFUND_FAILED | (변경 없음) | PG_REFUND PENDING | Worker 재시도. 성공 시 Payment.REFUNDED + task SUCCESS, max retry 초과 시 task FAILED |
 | C-1. cancel(PAID), refund 성공 | REFUNDED | CANCELLED | 없음 | cancellation.status=SUCCEEDED |
 | C-2. cancel(PAID), refund 실패 | REFUND_FAILED | CANCELLED | PG_REFUND PENDING | cancellation.status=REFUND_FAILED. Worker 재시도 |
 | D. cancel(CREATED, 미결제) | (해당 Payment 없음) | CANCELLED | 없음 | refund 호출 안 함 |
+
+> **PaymentLifecycleService(REQUIRES_NEW) 도입 근거 (Stripe PaymentIntent 패턴)**:
+> Payment의 `REQUESTED` 저장 + `APPROVED`/`FAILED` 전이를 각각 별도 트랜잭션(REQUIRES_NEW)으로 commit한다. 이렇게 하지 않으면 시나리오 A/B에서 메인 트랜잭션 롤백 시 Payment audit이 함께 사라져 매트릭스대로 검증할 수 없다. `payOrder` 메인 트랜잭션은 사실상 `Order.markPaid` + `OutboxEvent.save`만 보호하며, Payment 자체는 외부 PG와의 통신 audit이라 메인 흐름 실패와 무관하게 영구 보존한다.
+>
+> 참고: `compensateApprovedPayment`도 nullable Payment를 허용해 race condition / 동시 cancel 등에서도 안전하게 동작한다 (PG.refund + CompensationTask 등록은 항상 수행, Payment status 갱신은 가능할 때만).
 
 #### 5.6 cancellations 테이블 schema
 
@@ -293,10 +298,13 @@ compensation_tasks
 
 | 호출 | propagation | 비고 |
 |---|---|---|
-| `OrderUseCase.payOrder` | Required (메인) | DB 실패 시 롤백. PG approve 성공이면 보상 trigger 후 throw |
+| `OrderUseCase.payOrder` | Required (메인) | Order.markPaid + OutboxEvent.save만 보호. Payment 라이프사이클은 별도 commit |
 | `OrderUseCase.cancelOrder` | Required (메인) | cancellation insert + Order 전이. 환불 호출은 `CompensationService.compensateApprovedPayment` 위임 (REQUIRES_NEW) |
+| `PaymentLifecycleService.createRequested` | REQUIRES_NEW | Payment.REQUESTED 즉시 commit (audit + idempotency_key 등록) |
+| `PaymentLifecycleService.markFailed` | REQUIRES_NEW | 시나리오 A에서 Payment.FAILED 별도 commit |
+| `PaymentLifecycleService.markApproved` | REQUIRES_NEW | PG.approve 성공 직후 Payment.APPROVED 별도 commit |
 | `CompensationService.compensateApprovedPayment` | REQUIRES_NEW | 메인 롤백과 독립. PG.refund + Payment 상태 전이 + 실패 시 CompensationTask insert |
-| `CompensationService.processCompensationTask` | REQUIRES_NEW | Worker가 호출. task 단위 1트랜잭션 |
+| `CompensationService.processCompensationTask` | REQUIRED | Worker outer 트랜잭션(SKIP LOCKED) 안에서 동일 row를 UPDATE하기 위해 propagation을 REQUIRED로 채택. REQUIRES_NEW면 inner UPDATE가 outer X-lock에 막혀 deadlock 발생 |
 | `OutboxPublisher.publish` (배치 단위) | REQUIRES_NEW | (Level 3 기존) |
 | `OrderPaidEventListener.handle` | REQUIRES_NEW | (Level 4 기존) |
 
