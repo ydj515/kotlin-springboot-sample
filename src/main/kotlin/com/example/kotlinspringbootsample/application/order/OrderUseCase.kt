@@ -2,6 +2,7 @@ package com.example.kotlinspringbootsample.application.order
 
 import com.example.kotlinspringbootsample.application.compensation.CompensationOutcome
 import com.example.kotlinspringbootsample.application.compensation.CompensationService
+import com.example.kotlinspringbootsample.application.payment.PaymentLifecycleService
 import com.example.kotlinspringbootsample.application.order.command.CancelOrderCommand
 import com.example.kotlinspringbootsample.application.order.command.CreateOrderCommand
 import com.example.kotlinspringbootsample.application.order.command.FindOrdersCommand
@@ -56,7 +57,8 @@ class OrderUseCase(
     private val outboxEventRepository: OutboxEventRepository,
     private val objectMapper: ObjectMapper,
     private val compensationService: CompensationService,
-    private val cancellationRepository: CancellationRepository
+    private val cancellationRepository: CancellationRepository,
+    private val paymentLifecycleService: PaymentLifecycleService
 ) {
     fun getOrders(command: FindOrdersCommand): Page<OrderSummaryResult> {
         val pageable = PageRequest.of(command.page, command.size, Sort.by(Sort.Direction.DESC, "createdAt"))
@@ -108,30 +110,28 @@ class OrderUseCase(
             return replayExistingPayment(existing, order, command)
         }
 
-        // 2. 신규 결제: 상태 전이 검증 + Payment.REQUESTED 저장
+        // 2. 신규 결제: 상태 전이 검증 + Payment.REQUESTED 별도 commit (REQUIRES_NEW)
         orderStatusTransitionPolicy.validatePayable(order)
-        val payment = paymentRepository.save(
-            Payment.request(
-                orderId = requireNotNull(order.id),
-                idempotencyKey = command.idempotencyKey,
-                amount = order.totalAmount
-            )
+        val payment = paymentLifecycleService.createRequested(
+            orderId = requireNotNull(order.id),
+            idempotencyKey = command.idempotencyKey,
+            amount = order.totalAmount
         )
+        val paymentId = requireNotNull(payment.id)
 
-        // 3. PG.approve 호출 — 시나리오 A (PG 실패): Payment.FAILED 기록 후 예외 재전파, 보상 불필요
+        // 3. PG.approve — 시나리오 A (실패): Payment.FAILED 별도 commit + 예외 재전파, 보상 불필요
         val approveResult = try {
             paymentGateway.approve(order.totalAmount, command.idempotencyKey)
         } catch (e: PaymentApprovalFailedException) {
-            payment.markFailed(reason = e.message ?: "PG declined")
-            paymentRepository.save(payment)
+            paymentLifecycleService.markFailed(paymentId, reason = e.message ?: "PG declined")
             throw e
         }
 
-        // 4. 시나리오 B 진입: PG approve는 성공. 여기 이후 실패는 모두 보상(자동 환불) 대상.
-        val paymentId = requireNotNull(payment.id)
+        // 4. Payment.APPROVED 별도 commit (REQUIRES_NEW) — 메인 롤백과 무관하게 audit 보존
+        paymentLifecycleService.markApproved(paymentId, approveResult.paymentKey, approveResult.approvedAt)
+
+        // 5. 시나리오 B 진입: 여기 이후 실패는 모두 보상(자동 환불) 대상.
         return try {
-            payment.markApproved(approveResult.paymentKey, approveResult.approvedAt)
-            paymentRepository.save(payment)
             order.markPaid(approveResult.approvedAt)
             publishOrderPaidEventToOutbox(order, payment, approveResult.paymentKey, approveResult.approvedAt)
             order.toResult().copy(paymentKey = approveResult.paymentKey)

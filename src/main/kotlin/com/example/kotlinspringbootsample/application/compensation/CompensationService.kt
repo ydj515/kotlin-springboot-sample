@@ -30,6 +30,15 @@ class CompensationService(
      * - PG.refund 성공 → Payment.markRefunded + save (보상 완료)
      * - PG.refund 실패 → Payment.markRefundFailed + CompensationTask insert (worker가 재시도)
      */
+    /**
+     * payOrder/cancelOrder의 보상 호출 진입점. REQUIRES_NEW로 메인 트랜잭션과 독립 commit.
+     *
+     * payOrder 시나리오(B): 메인 트랜잭션이 commit되지 않은 채로 호출되므로,
+     * 해당 Payment row가 REQUIRES_NEW에서 보이지 않을 수 있다 (격리 수준 READ_COMMITTED 이상).
+     * 그래서 payment is nullable — PG.refund는 항상 시도하고, Payment 상태 갱신은 가능할 때만 수행.
+     *
+     * cancelOrder 시나리오(C): Payment가 이미 APPROVED 상태로 commit돼 있어 정상 전이된다.
+     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     fun compensateApprovedPayment(
         paymentId: Long,
@@ -38,20 +47,24 @@ class CompensationService(
         reason: String,
         now: LocalDateTime = LocalDateTime.now()
     ): CompensationOutcome {
-        val payment = paymentRepository.findById(paymentId).orElseThrow {
-            PaymentNotFoundException("payment not found: id=$paymentId")
-        }
+        val payment = paymentRepository.findById(paymentId).orElse(null)
 
         return try {
             val result = paymentGateway.refund(paymentKey, amount)
-            payment.markRefunded(result.refundedAt, "compensation refund: $reason")
-            paymentRepository.save(payment)
-            log.info("compensation refund succeeded: paymentId={} reason={}", paymentId, reason)
+            if (payment != null && payment.status == PaymentStatus.APPROVED) {
+                payment.markRefunded(result.refundedAt, "compensation refund: $reason")
+                paymentRepository.save(payment)
+            }
+            log.info(
+                "compensation refund succeeded: paymentId={} paymentVisible={} reason={}",
+                paymentId, payment != null, reason
+            )
             CompensationOutcome.Refunded(result.refundedAt)
         } catch (e: Exception) {
-            payment.markRefundFailed("compensation refund failed: ${e.message}", now)
-            paymentRepository.save(payment)
-
+            if (payment != null && payment.status == PaymentStatus.APPROVED) {
+                payment.markRefundFailed("compensation refund failed: ${e.message}", now)
+                paymentRepository.save(payment)
+            }
             val payload = objectMapper.writeValueAsString(
                 PgRefundPayload(
                     paymentId = paymentId,
@@ -77,9 +90,13 @@ class CompensationService(
 
     /**
      * CompensationRetryWorker가 PENDING task를 위해 호출.
-     * REQUIRES_NEW로 worker 루프의 row-lock 트랜잭션과 분리한다.
+     *
+     * propagation = REQUIRED:
+     * Worker의 outer 트랜잭션이 SELECT FOR UPDATE SKIP LOCKED로 잠근 row를
+     * 같은 트랜잭션 안에서 UPDATE해야 lock contention 없이 처리할 수 있다.
+     * REQUIRES_NEW로 분리하면 inner UPDATE가 outer의 X-lock에 막혀 deadlock된다.
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.REQUIRED)
     fun processCompensationTask(taskId: Long, now: LocalDateTime = LocalDateTime.now()) {
         val task = compensationTaskRepository.findById(taskId).orElseThrow {
             IllegalStateException("compensation task not found: id=$taskId")
@@ -92,12 +109,11 @@ class CompensationService(
 
     private fun retryPgRefund(task: CompensationTask, now: LocalDateTime) {
         val payload = objectMapper.readValue(task.payload, PgRefundPayload::class.java)
-        val payment = paymentRepository.findById(payload.paymentId).orElseThrow {
-            PaymentNotFoundException("payment not found: id=${payload.paymentId}")
-        }
+        // payment는 payOrder 보상 경로(시나리오 B-2)에서는 메인 롤백으로 사라질 수 있으므로 nullable
+        val payment = paymentRepository.findById(payload.paymentId).orElse(null)
 
         // 이미 다른 경로로 환불된 경우 (e.g. 동시 cancel 등) — task 즉시 완료 처리
-        if (payment.status == PaymentStatus.REFUNDED) {
+        if (payment != null && payment.status == PaymentStatus.REFUNDED) {
             task.markSuccess(now)
             compensationTaskRepository.save(task)
             log.info("compensation task short-circuit (already refunded): taskId={}", task.id)
@@ -106,11 +122,13 @@ class CompensationService(
 
         try {
             val result = paymentGateway.refund(payload.paymentKey, payload.amount)
-            payment.markRefunded(result.refundedAt, "compensation retry succeeded")
-            paymentRepository.save(payment)
+            if (payment != null && payment.status == PaymentStatus.APPROVED) {
+                payment.markRefunded(result.refundedAt, "compensation retry succeeded")
+                paymentRepository.save(payment)
+            }
             task.markSuccess(now)
             compensationTaskRepository.save(task)
-            log.info("compensation task succeeded: taskId={}", task.id)
+            log.info("compensation task succeeded: taskId={} paymentVisible={}", task.id, payment != null)
         } catch (e: Exception) {
             val nextRetry = task.retryCount + 1
             if (nextRetry >= MAX_RETRY) {
