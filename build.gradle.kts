@@ -77,3 +77,24 @@ allOpen {
 tasks.withType<Test> {
     useJUnitPlatform()
 }
+
+// 단위 테스트: 통합 테스트 클래스(*IntegrationTest)는 제외.
+// Testcontainers + MySQL 부팅 비용 없이 빠른 피드백 유지.
+tasks.named<Test>("test") {
+    exclude("**/*IntegrationTest*")
+}
+
+// MySQL Testcontainers 기반 통합 테스트만 따로 실행한다.
+// 클래스명이 *IntegrationTest로 끝나면 자동 포함.
+val integrationTest = tasks.register<Test>("integrationTest") {
+    description = "MySQL Testcontainers 기반 통합 테스트를 실행합니다."
+    group = "verification"
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    shouldRunAfter(tasks.named("test"))
+    useJUnitPlatform()
+    include("**/*IntegrationTest*")
+}
+
+// check 단계에 integrationTest를 포함하지 않는다.
+// CI에서는 별도 job으로 명시 실행해 Docker가 필요한 환경에서만 동작하도록 한다.
