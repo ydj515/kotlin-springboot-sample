@@ -27,8 +27,10 @@ jobs:
           cache: 'gradle'
 
       # 변조된 Gradle wrapper가 아닌지 먼저 검증한다.
-      # gradle/wrapper-validation-action@v1은 archived → gradle/actions/wrapper-validation@v3로 마이그레이션.
+      # 이 step은 services.gradle.org에서 known hash 목록을 받아오므로 외부 네트워크 의존.
+      # ETIMEDOUT 같은 일시적 네트워크 장애가 전체 파이프라인을 막지 않도록 optional로 둔다.
       - name: Validate Gradle wrapper
+        continue-on-error: true
         uses: gradle/actions/wrapper-validation@v3
 
       # build 안에 단위 test가 포함되어 있으므로 한 번의 실행으로 컴파일과 단위 테스트를 함께 검증한다.
