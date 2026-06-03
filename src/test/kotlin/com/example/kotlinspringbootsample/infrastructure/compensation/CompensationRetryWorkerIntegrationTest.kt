@@ -15,9 +15,11 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.math.BigDecimal
 import java.time.LocalDateTime
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 class CompensationRetryWorkerIntegrationTest @Autowired constructor(
     private val worker: CompensationRetryWorker,
@@ -35,23 +37,30 @@ class CompensationRetryWorkerIntegrationTest @Autowired constructor(
     @Test
     fun `worker가 PENDING task를 처리하면 PG refund 성공시 task SUCCESS로 전이된다`() {
         val taskId = insertPendingTask(paymentKey = "MOCK-PG-retry-1", amount = BigDecimal("1000.00"))
+        val refundTxActive = AtomicBoolean(true)
 
-        every { paymentGateway.refund("MOCK-PG-retry-1", any()) } returns
+        every { paymentGateway.refund("MOCK-PG-retry-1", any()) } answers {
+            refundTxActive.set(TransactionSynchronizationManager.isActualTransactionActive())
             RefundResult(refundedAt = LocalDateTime.now().withNano(0))
+        }
 
         worker.runBatch()
 
         val task = compensationTaskRepository.findById(taskId).orElseThrow()
         assertThat(task.status).isEqualTo(CompensationTaskStatus.SUCCESS)
         assertThat(task.lastError).isNull()
+        assertThat(refundTxActive.get()).isFalse
     }
 
     @Test
     fun `worker가 PG refund를 3회 연속 실패하면 task가 FAILED로 종결된다 (max retry exceeded)`() {
         val taskId = insertPendingTask(paymentKey = "MOCK-PG-retry-fail", amount = BigDecimal("2000.00"))
+        val refundTxActive = AtomicBoolean(true)
 
-        every { paymentGateway.refund("MOCK-PG-retry-fail", any()) } throws
-            RuntimeException("persistent PG failure")
+        every { paymentGateway.refund("MOCK-PG-retry-fail", any()) } answers {
+            refundTxActive.set(TransactionSynchronizationManager.isActualTransactionActive())
+            throw RuntimeException("persistent PG failure")
+        }
 
         // 1차 시도 — retry_count 1로 PENDING + nextAttemptAt 미래
         worker.runBatch()
@@ -67,6 +76,7 @@ class CompensationRetryWorkerIntegrationTest @Autowired constructor(
         val task = compensationTaskRepository.findById(taskId).orElseThrow()
         assertThat(task.status).isEqualTo(CompensationTaskStatus.FAILED)
         assertThat(task.lastError).contains("max retry exceeded")
+        assertThat(refundTxActive.get()).isFalse
     }
 
     private fun insertPendingTask(paymentKey: String, amount: BigDecimal): Long {

@@ -28,9 +28,11 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.math.BigDecimal
 import java.time.LocalDateTime
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 class CancelOrderIntegrationTest @Autowired constructor(
     private val orderUseCase: OrderUseCase,
@@ -56,13 +58,17 @@ class CancelOrderIntegrationTest @Autowired constructor(
         val orderId = setupPaidOrder(BigDecimal("10000.00"))
         val payment = paymentRepository.findAll().first()
         val cancelKey = "cancel-c1-${UUID.randomUUID()}"
+        val refundTxActive = AtomicBoolean(true)
 
-        every { paymentGateway.refund(payment.paymentKey!!, payment.amount) } returns
+        every { paymentGateway.refund(payment.paymentKey!!, payment.amount) } answers {
+            refundTxActive.set(TransactionSynchronizationManager.isActualTransactionActive())
             RefundResult(refundedAt = LocalDateTime.now().withNano(0))
+        }
 
         val result = orderUseCase.cancelOrder(CancelOrderCommand(orderId, cancelKey, reason = "고객 요청"))
 
         assertThat(result.status).isEqualTo(OrderStatus.CANCELLED)
+        assertThat(refundTxActive.get()).isFalse
         val refreshedPayment = paymentRepository.findById(payment.id!!).orElseThrow()
         assertThat(refreshedPayment.status).isEqualTo(PaymentStatus.REFUNDED)
         val cancellation = cancellationRepository.findByIdempotencyKey(cancelKey)!!
@@ -76,12 +82,16 @@ class CancelOrderIntegrationTest @Autowired constructor(
         val orderId = setupPaidOrder(BigDecimal("12000.00"))
         val payment = paymentRepository.findAll().first()
         val cancelKey = "cancel-c2-${UUID.randomUUID()}"
+        val refundTxActive = AtomicBoolean(true)
 
-        every { paymentGateway.refund(payment.paymentKey!!, payment.amount) } throws
-            RuntimeException("simulated PG refund failure")
+        every { paymentGateway.refund(payment.paymentKey!!, payment.amount) } answers {
+            refundTxActive.set(TransactionSynchronizationManager.isActualTransactionActive())
+            throw RuntimeException("simulated PG refund failure")
+        }
 
         orderUseCase.cancelOrder(CancelOrderCommand(orderId, cancelKey, reason = "테스트"))
 
+        assertThat(refundTxActive.get()).isFalse
         val refreshedPayment = paymentRepository.findById(payment.id!!).orElseThrow()
         assertThat(refreshedPayment.status).isEqualTo(PaymentStatus.REFUND_FAILED)
         val cancellation = cancellationRepository.findByIdempotencyKey(cancelKey)!!

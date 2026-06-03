@@ -254,10 +254,10 @@ try {
 | C-2. cancel(PAID), refund 실패 | REFUND_FAILED | CANCELLED | PG_REFUND PENDING | cancellation.status=REFUND_FAILED. Worker 재시도 |
 | D. cancel(CREATED, 미결제) | (해당 Payment 없음) | CANCELLED | 없음 | refund 호출 안 함 |
 
-> **PaymentLifecycleService(REQUIRES_NEW) 도입 근거 (Stripe PaymentIntent 패턴)**:
-> Payment의 `REQUESTED` 저장 + `APPROVED`/`FAILED` 전이를 각각 별도 트랜잭션(REQUIRES_NEW)으로 commit한다. 이렇게 하지 않으면 시나리오 A/B에서 메인 트랜잭션 롤백 시 Payment audit이 함께 사라져 매트릭스대로 검증할 수 없다. `payOrder` 메인 트랜잭션은 사실상 `Order.markPaid` + `OutboxEvent.save`만 보호하며, Payment 자체는 외부 PG와의 통신 audit이라 메인 흐름 실패와 무관하게 영구 보존한다.
+> **짧은 DB 트랜잭션 + 외부 PG 호출 분리 근거 (Stripe PaymentIntent 패턴)**:
+> `OrderUseCase.payOrder`는 트랜잭션을 열지 않는 오케스트레이션 계층으로 두고, `OrderPaymentTransactionService`가 `Payment.REQUESTED` 저장, `Payment.APPROVED`/`FAILED` 기록, `Order.markPaid + OutboxEvent.save`를 각각 짧은 트랜잭션으로 처리한다. PG approve/refund는 어떤 DB 트랜잭션 안에서도 호출하지 않는다. 이렇게 해야 외부 호출 지연으로 DB 커넥션/락을 오래 점유하지 않으면서도 Payment audit을 보존할 수 있다.
 >
-> 참고: `compensateApprovedPayment`도 nullable Payment를 허용해 race condition / 동시 cancel 등에서도 안전하게 동작한다 (PG.refund + CompensationTask 등록은 항상 수행, Payment status 갱신은 가능할 때만).
+> 참고: `compensateApprovedPayment`도 PG.refund를 먼저 트랜잭션 밖에서 호출하고, 환불 성공/실패 기록과 CompensationTask 등록만 짧은 트랜잭션으로 수행한다.
 
 #### 5.6 cancellations 테이블 schema
 
@@ -298,15 +298,18 @@ compensation_tasks
 
 | 호출 | propagation | 비고 |
 |---|---|---|
-| `OrderUseCase.payOrder` | Required (메인) | Order.markPaid + OutboxEvent.save만 보호. Payment 라이프사이클은 별도 commit |
-| `OrderUseCase.cancelOrder` | Required (메인) | cancellation insert + Order 전이. 환불 호출은 `CompensationService.compensateApprovedPayment` 위임 (REQUIRES_NEW) |
-| `PaymentLifecycleService.createRequested` | REQUIRES_NEW | Payment.REQUESTED 즉시 commit (audit + idempotency_key 등록) |
-| `PaymentLifecycleService.markFailed` | REQUIRES_NEW | 시나리오 A에서 Payment.FAILED 별도 commit |
-| `PaymentLifecycleService.markApproved` | REQUIRES_NEW | PG.approve 성공 직후 Payment.APPROVED 별도 commit |
-| `CompensationService.compensateApprovedPayment` | REQUIRES_NEW | 메인 롤백과 독립. PG.refund + Payment 상태 전이 + 실패 시 CompensationTask insert |
-| `CompensationService.processCompensationTask` | REQUIRED | Worker outer 트랜잭션(SKIP LOCKED) 안에서 동일 row를 UPDATE하기 위해 propagation을 REQUIRED로 채택. REQUIRES_NEW면 inner UPDATE가 outer X-lock에 막혀 deadlock 발생 |
+| `OrderUseCase.payOrder` | 없음 | 결제 오케스트레이션. PG.approve는 트랜잭션 밖에서 호출 |
+| `OrderPaymentTransactionService.preparePayOrder` | REQUIRED | 주문 row를 `PESSIMISTIC_WRITE`로 짧게 잠그고 Payment.REQUESTED 저장. 동일 주문의 REQUESTED/APPROVED payment가 있으면 차단 |
+| `OrderPaymentTransactionService.markPaymentFailed` | REQUIRED | PG approve 명시 실패 시 Payment.FAILED 기록 |
+| `OrderPaymentTransactionService.markPaymentApproved` | REQUIRED | PG approve 성공 후 Payment.APPROVED audit 기록 |
+| `OrderPaymentTransactionService.completePayOrder` | REQUIRED | Order.markPaid + OutboxEvent.save 원자 처리. 실패 시 호출자는 refund 보상 |
+| `OrderUseCase.cancelOrder` | 없음 | 취소 오케스트레이션. PG.refund는 트랜잭션 밖에서 호출 |
+| `OrderPaymentTransactionService.prepareCancelOrder` | REQUIRED | cancellation insert + Order CANCELLED 전이를 짧은 트랜잭션으로 처리 |
+| `CompensationService.compensateApprovedPayment` | 없음 | PG.refund를 트랜잭션 밖에서 호출 |
+| `CompensationTransactionService.*` | REQUIRES_NEW/readonly | 환불 결과 기록, CompensationTask claim/update만 짧은 트랜잭션으로 처리 |
+| `CompensationRetryWorker.runBatch` | 없음 | task claim 후 PG.refund 재시도는 트랜잭션 밖에서 수행 |
 | `OutboxPublisher.publish` (배치 단위) | REQUIRES_NEW | (Level 3 기존) |
-| `OrderPaidEventListener.handle` | REQUIRES_NEW | (Level 4 기존) |
+| `ProcessedEventService.tryMarkProcessed` | REQUIRES_NEW | 이벤트 dedup 기록만 짧은 트랜잭션으로 처리. SMS 전송은 트랜잭션 밖에서 수행 |
 
 #### 5.9 테스트 전략 — DB 실패 시뮬레이션
 

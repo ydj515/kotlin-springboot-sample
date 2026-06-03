@@ -26,9 +26,11 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.math.BigDecimal
 import java.time.LocalDateTime
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 class PayOrderCompensationMySqlIntegrationTest @Autowired constructor(
     private val orderUseCase: OrderUseCase,
@@ -66,9 +68,12 @@ class PayOrderCompensationMySqlIntegrationTest @Autowired constructor(
         val orderId = setupCreatedOrder(amount = BigDecimal("10000.00"))
         val key = "scenario-a-${UUID.randomUUID()}"
         createdPaymentKeys += key
+        val approveTxActive = AtomicBoolean(true)
 
-        every { paymentGateway.approve(any(), key) } throws
-            PaymentApprovalFailedException("PG declined: insufficient funds")
+        every { paymentGateway.approve(any(), key) } answers {
+            approveTxActive.set(TransactionSynchronizationManager.isActualTransactionActive())
+            throw PaymentApprovalFailedException("PG declined: insufficient funds")
+        }
 
         assertThatThrownBy { orderUseCase.payOrder(PayOrderCommand(orderId, key)) }
             .isInstanceOf(PaymentApprovalFailedException::class.java)
@@ -81,6 +86,7 @@ class PayOrderCompensationMySqlIntegrationTest @Autowired constructor(
         assertThat(payment).isNotNull
         assertThat(payment!!.status).isEqualTo(PaymentStatus.FAILED)
 
+        assertThat(approveTxActive.get()).isFalse
         verify(exactly = 0) { paymentGateway.refund(any(), any()) }
         assertThat(compensationTaskRepository.count()).isZero
     }
@@ -91,11 +97,17 @@ class PayOrderCompensationMySqlIntegrationTest @Autowired constructor(
         val key = "scenario-b1-${UUID.randomUUID()}"
         createdPaymentKeys += key
         val approvedAt = LocalDateTime.now().withNano(0)
+        val approveTxActive = AtomicBoolean(true)
+        val refundTxActive = AtomicBoolean(true)
 
-        every { paymentGateway.approve(any(), key) } returns
+        every { paymentGateway.approve(any(), key) } answers {
+            approveTxActive.set(TransactionSynchronizationManager.isActualTransactionActive())
             ApproveResult(paymentKey = "MOCK-PG-b1", approvedAt = approvedAt)
-        every { paymentGateway.refund("MOCK-PG-b1", any()) } returns
+        }
+        every { paymentGateway.refund("MOCK-PG-b1", any()) } answers {
+            refundTxActive.set(TransactionSynchronizationManager.isActualTransactionActive())
             com.example.kotlinspringbootsample.domain.payment.gateway.RefundResult(refundedAt = approvedAt.plusSeconds(1))
+        }
         every { outboxEventRepository.save(any()) } throws
             RuntimeException("simulated outbox failure")
 
@@ -107,12 +119,13 @@ class PayOrderCompensationMySqlIntegrationTest @Autowired constructor(
         val order = orderRepository.findById(orderId).orElseThrow()
         assertThat(order.status).isEqualTo(OrderStatus.CREATED)
 
-        // PaymentLifecycleService(REQUIRES_NEW)로 audit이 보존되어 Payment.REFUNDED로 종결
+        // 승인 audit이 먼저 commit되고, 주문 완료 트랜잭션 실패 후 환불 보상으로 Payment.REFUNDED 종결
         val payment = paymentRepository.findByIdempotencyKey(key)
         assertThat(payment).isNotNull
         assertThat(payment!!.status).isEqualTo(PaymentStatus.REFUNDED)
 
-        // 별도 REQUIRES_NEW 트랜잭션에서 PG.refund 호출 + CompensationTask 없음 (즉시 성공)
+        assertThat(approveTxActive.get()).isFalse
+        assertThat(refundTxActive.get()).isFalse
         verify(exactly = 1) { paymentGateway.refund("MOCK-PG-b1", any()) }
         assertThat(compensationTaskRepository.count()).isZero
     }
@@ -123,11 +136,17 @@ class PayOrderCompensationMySqlIntegrationTest @Autowired constructor(
         val key = "scenario-b2-${UUID.randomUUID()}"
         createdPaymentKeys += key
         val approvedAt = LocalDateTime.now().withNano(0)
+        val approveTxActive = AtomicBoolean(true)
+        val refundTxActive = AtomicBoolean(true)
 
-        every { paymentGateway.approve(any(), key) } returns
+        every { paymentGateway.approve(any(), key) } answers {
+            approveTxActive.set(TransactionSynchronizationManager.isActualTransactionActive())
             ApproveResult(paymentKey = "MOCK-PG-b2", approvedAt = approvedAt)
-        every { paymentGateway.refund("MOCK-PG-b2", any()) } throws
-            RuntimeException("simulated PG refund failure")
+        }
+        every { paymentGateway.refund("MOCK-PG-b2", any()) } answers {
+            refundTxActive.set(TransactionSynchronizationManager.isActualTransactionActive())
+            throw RuntimeException("simulated PG refund failure")
+        }
         every { outboxEventRepository.save(any()) } throws
             RuntimeException("simulated outbox failure")
 
@@ -142,6 +161,8 @@ class PayOrderCompensationMySqlIntegrationTest @Autowired constructor(
         assertThat(payment).isNotNull
         assertThat(payment!!.status).isEqualTo(PaymentStatus.REFUND_FAILED)
 
+        assertThat(approveTxActive.get()).isFalse
+        assertThat(refundTxActive.get()).isFalse
         verify(exactly = 1) { paymentGateway.refund("MOCK-PG-b2", any()) }
 
         val tasks = compensationTaskRepository.findAll()

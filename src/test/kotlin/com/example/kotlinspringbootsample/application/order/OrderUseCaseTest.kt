@@ -2,7 +2,6 @@ package com.example.kotlinspringbootsample.application.order
 
 import com.example.kotlinspringbootsample.application.compensation.CompensationOutcome
 import com.example.kotlinspringbootsample.application.compensation.CompensationService
-import com.example.kotlinspringbootsample.application.payment.PaymentLifecycleService
 import com.example.kotlinspringbootsample.application.order.command.CancelOrderCommand
 import com.example.kotlinspringbootsample.application.order.command.FindOrdersCommand
 import com.example.kotlinspringbootsample.application.order.command.FindOrderStatusSummariesCommand
@@ -17,26 +16,15 @@ import com.example.kotlinspringbootsample.domain.order.ShippingAddress
 import com.example.kotlinspringbootsample.domain.order.exception.InvalidOrderStatusTransitionException
 import com.example.kotlinspringbootsample.domain.order.policy.OrderItemPolicy
 import com.example.kotlinspringbootsample.domain.order.policy.OrderStatusTransitionPolicy
-import com.example.kotlinspringbootsample.domain.order.repository.CancellationRepository
 import com.example.kotlinspringbootsample.domain.order.repository.OrderRepository
 import com.example.kotlinspringbootsample.domain.order.repository.projection.OrderStatusSummaryProjection
 import com.example.kotlinspringbootsample.domain.order.service.OrderLookupService
-import com.example.kotlinspringbootsample.domain.outbox.OutboxEvent
-import com.example.kotlinspringbootsample.domain.outbox.repository.OutboxEventRepository
-import com.example.kotlinspringbootsample.domain.payment.Payment
-import com.example.kotlinspringbootsample.domain.payment.PaymentStatus
-import com.example.kotlinspringbootsample.domain.payment.exception.IdempotencyConflictException
 import com.example.kotlinspringbootsample.domain.payment.exception.PaymentApprovalFailedException
 import com.example.kotlinspringbootsample.domain.payment.gateway.ApproveResult
 import com.example.kotlinspringbootsample.domain.payment.gateway.PaymentGateway
-import com.example.kotlinspringbootsample.domain.payment.repository.PaymentRepository
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.BehaviorSpec
 import io.kotest.matchers.collections.shouldHaveSize
-import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.mockk.clearMocks
@@ -46,6 +34,7 @@ import io.mockk.verify
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
+import java.math.BigDecimal
 import java.time.LocalDateTime
 
 class OrderUseCaseTest : BehaviorSpec({
@@ -54,12 +43,8 @@ class OrderUseCaseTest : BehaviorSpec({
     val customerLookupService = mockk<CustomerLookupService>()
     val orderLookupService = mockk<OrderLookupService>()
     val paymentGateway = mockk<PaymentGateway>()
-    val paymentRepository = mockk<PaymentRepository>()
-    val outboxEventRepository = mockk<OutboxEventRepository>()
     val compensationService = mockk<CompensationService>()
-    val cancellationRepository = mockk<CancellationRepository>()
-    val paymentLifecycleService = mockk<PaymentLifecycleService>()
-    val objectMapper: ObjectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
+    val orderPaymentTransactionService = mockk<OrderPaymentTransactionService>()
     val orderUseCase = OrderUseCase(
         orderRepository = orderRepository,
         customerLookupService = customerLookupService,
@@ -67,134 +52,77 @@ class OrderUseCaseTest : BehaviorSpec({
         orderItemPolicy = OrderItemPolicy(),
         orderStatusTransitionPolicy = OrderStatusTransitionPolicy(),
         paymentGateway = paymentGateway,
-        paymentRepository = paymentRepository,
-        outboxEventRepository = outboxEventRepository,
-        objectMapper = objectMapper,
         compensationService = compensationService,
-        cancellationRepository = cancellationRepository,
-        paymentLifecycleService = paymentLifecycleService
+        orderPaymentTransactionService = orderPaymentTransactionService
     )
 
     beforeTest {
         clearMocks(
-            orderRepository, customerLookupService, orderLookupService,
-            paymentGateway, paymentRepository, outboxEventRepository,
-            compensationService, cancellationRepository, paymentLifecycleService
+            orderRepository,
+            customerLookupService,
+            orderLookupService,
+            paymentGateway,
+            compensationService,
+            orderPaymentTransactionService
         )
     }
 
     Given("주문 결제 요청이 들어오면") {
         val idempotencyKey = "550e8400-e29b-41d4-a716-446655440000"
 
-        When("idempotencyKey가 신규이고 주문이 CREATED 상태면") {
-            Then("Payment.REQUESTED 저장 → PG approve → Payment.APPROVED + Order.markPaid + OutboxEvent insert 흐름이 수행된다") {
-                val order = sampleOrder(id = 1L)
+        When("신규 결제이고 PG approve와 주문 완료 DB 반영이 모두 성공하면") {
+            Then("결제 준비 트랜잭션 이후 PG approve를 호출하고 승인 기록과 주문 완료를 순서대로 위임한다") {
                 val approvedAt = LocalDateTime.of(2026, 5, 8, 10, 0)
-                val requestedPayment = Payment(
-                    id = 99L,
+                val amount = BigDecimal("10000.00")
+                val preparation = PayOrderPreparation.ApprovalRequired(
                     orderId = 1L,
-                    idempotencyKey = idempotencyKey,
-                    amount = order.totalAmount,
-                    status = PaymentStatus.REQUESTED
+                    paymentId = 99L,
+                    amount = amount,
+                    idempotencyKey = idempotencyKey
                 )
+                val result = paidOrderResult(id = 1L, amount = amount, approvedAt = approvedAt)
+                    .copy(paymentKey = "MOCK-PG-test-key")
 
-                every { orderLookupService.requireById(1L) } returns order
-                every { paymentRepository.findByIdempotencyKey(idempotencyKey) } returns null
-                every { paymentLifecycleService.createRequested(1L, idempotencyKey, order.totalAmount) } returns requestedPayment
-                every { paymentGateway.approve(order.totalAmount, idempotencyKey) } returns
+                every { orderPaymentTransactionService.preparePayOrder(PayOrderCommand(1L, idempotencyKey)) } returns
+                    preparation
+                every { paymentGateway.approve(amount, idempotencyKey) } returns
                     ApproveResult(paymentKey = "MOCK-PG-test-key", approvedAt = approvedAt)
-                every { paymentLifecycleService.markApproved(99L, "MOCK-PG-test-key", approvedAt) } returns requestedPayment
-                every { outboxEventRepository.save(any<OutboxEvent>()) } answers { firstArg() }
+                every { orderPaymentTransactionService.markPaymentApproved(99L, "MOCK-PG-test-key", approvedAt) } returns
+                    Unit
+                every {
+                    orderPaymentTransactionService.completePayOrder(1L, 99L, "MOCK-PG-test-key", approvedAt)
+                } returns result
 
-                val result = orderUseCase.payOrder(PayOrderCommand(1L, idempotencyKey))
+                val actual = orderUseCase.payOrder(PayOrderCommand(1L, idempotencyKey))
 
-                result.status shouldBe OrderStatus.PAID
-                result.paidAt shouldBe approvedAt
-                result.paymentKey shouldBe "MOCK-PG-test-key"
-                verify(exactly = 1) { paymentRepository.findByIdempotencyKey(idempotencyKey) }
-                verify(exactly = 1) { paymentLifecycleService.createRequested(1L, idempotencyKey, order.totalAmount) }
-                verify(exactly = 1) { paymentGateway.approve(order.totalAmount, idempotencyKey) }
-                verify(exactly = 1) { paymentLifecycleService.markApproved(99L, "MOCK-PG-test-key", approvedAt) }
-                verify(exactly = 1) { outboxEventRepository.save(any<OutboxEvent>()) }
+                actual.status shouldBe OrderStatus.PAID
+                actual.paymentKey shouldBe "MOCK-PG-test-key"
+                verify(exactly = 1) { paymentGateway.approve(amount, idempotencyKey) }
+                verify(exactly = 1) { orderPaymentTransactionService.markPaymentApproved(99L, "MOCK-PG-test-key", approvedAt) }
+                verify(exactly = 1) { orderPaymentTransactionService.completePayOrder(1L, 99L, "MOCK-PG-test-key", approvedAt) }
             }
         }
 
-        When("같은 idempotencyKey + 같은 order + 같은 amount로 재요청하면") {
-            Then("PG approve 재호출 없이 기존 paymentKey를 그대로 replay한다") {
-                val order = sampleOrder(id = 1L)
-                val existing = Payment(
-                    id = 99L,
-                    orderId = 1L,
-                    idempotencyKey = idempotencyKey,
-                    amount = order.totalAmount,
-                    status = PaymentStatus.APPROVED,
-                    paymentKey = "MOCK-PG-existing-key",
-                    approvedAt = LocalDateTime.of(2026, 5, 8, 9, 0)
-                )
+        When("같은 idempotencyKey 요청이 replay 대상이면") {
+            Then("PG approve를 다시 호출하지 않고 준비 단계의 결과를 반환한다") {
+                val result = paidOrderResult(id = 1L).copy(paymentKey = "MOCK-PG-existing-key")
 
-                every { orderLookupService.requireById(1L) } returns order
-                every { paymentRepository.findByIdempotencyKey(idempotencyKey) } returns existing
+                every { orderPaymentTransactionService.preparePayOrder(PayOrderCommand(1L, idempotencyKey)) } returns
+                    PayOrderPreparation.Replay(result)
 
-                val result = orderUseCase.payOrder(PayOrderCommand(1L, idempotencyKey))
+                val actual = orderUseCase.payOrder(PayOrderCommand(1L, idempotencyKey))
 
-                result.paymentKey shouldBe "MOCK-PG-existing-key"
+                actual.paymentKey shouldBe "MOCK-PG-existing-key"
                 verify(exactly = 0) { paymentGateway.approve(any(), any()) }
-                verify(exactly = 0) { paymentRepository.save(any<Payment>()) }
+                verify(exactly = 0) { orderPaymentTransactionService.markPaymentApproved(any(), any(), any()) }
+                verify(exactly = 0) { orderPaymentTransactionService.completePayOrder(any(), any(), any(), any()) }
             }
         }
 
-        When("같은 idempotencyKey가 다른 order에 이미 사용되었으면") {
-            Then("IdempotencyConflictException을 던진다") {
-                val order = sampleOrder(id = 1L)
-                val existing = Payment(
-                    id = 99L,
-                    orderId = 999L, // 다른 order
-                    idempotencyKey = idempotencyKey,
-                    amount = order.totalAmount,
-                    status = PaymentStatus.APPROVED,
-                    paymentKey = "MOCK-PG-other"
-                )
-
-                every { orderLookupService.requireById(1L) } returns order
-                every { paymentRepository.findByIdempotencyKey(idempotencyKey) } returns existing
-
-                shouldThrow<IdempotencyConflictException> {
-                    orderUseCase.payOrder(PayOrderCommand(1L, idempotencyKey))
-                }
-
-                verify(exactly = 0) { paymentGateway.approve(any(), any()) }
-            }
-        }
-
-        When("같은 idempotencyKey + 같은 order인데 amount가 다르면") {
-            Then("IdempotencyConflictException을 던진다") {
-                val order = sampleOrder(id = 1L)
-                val existing = Payment(
-                    id = 99L,
-                    orderId = 1L,
-                    idempotencyKey = idempotencyKey,
-                    amount = order.totalAmount.add(java.math.BigDecimal("1.00")), // 다른 amount
-                    status = PaymentStatus.APPROVED,
-                    paymentKey = "MOCK-PG-other"
-                )
-
-                every { orderLookupService.requireById(1L) } returns order
-                every { paymentRepository.findByIdempotencyKey(idempotencyKey) } returns existing
-
-                shouldThrow<IdempotencyConflictException> {
-                    orderUseCase.payOrder(PayOrderCommand(1L, idempotencyKey))
-                }
-            }
-        }
-
-        When("이미 결제된 주문이면") {
-            Then("PG approve 호출 없이 상태 전이 예외를 던진다") {
-                val order = sampleOrder(id = 1L).apply {
-                    markPaid(LocalDateTime.of(2026, 5, 8, 10, 0))
-                }
-
-                every { orderLookupService.requireById(1L) } returns order
-                every { paymentRepository.findByIdempotencyKey(idempotencyKey) } returns null
+        When("결제 준비 단계에서 주문 상태 전이 예외가 발생하면") {
+            Then("PG approve 호출 없이 예외를 전파한다") {
+                every { orderPaymentTransactionService.preparePayOrder(PayOrderCommand(1L, idempotencyKey)) } throws
+                    InvalidOrderStatusTransitionException("only created orders can be paid. current status: PAID")
 
                 val exception = shouldThrow<InvalidOrderStatusTransitionException> {
                     orderUseCase.payOrder(PayOrderCommand(1L, idempotencyKey))
@@ -205,65 +133,52 @@ class OrderUseCaseTest : BehaviorSpec({
             }
         }
 
-        When("PG approve가 PaymentApprovalFailedException을 던지면") {
-            Then("시나리오 A — PaymentLifecycleService.markFailed가 호출되고 Order 상태가 CREATED로 유지되며 예외가 전파된다 (보상 호출 없음)") {
-                val order = sampleOrder(id = 1L)
-                val requestedPayment = Payment(
-                    id = 99L,
+        When("PG approve가 명시적 결제 실패 예외를 던지면") {
+            Then("Payment FAILED 기록만 위임하고 환불 보상은 호출하지 않는다") {
+                val preparation = PayOrderPreparation.ApprovalRequired(
                     orderId = 1L,
-                    idempotencyKey = idempotencyKey,
-                    amount = order.totalAmount,
-                    status = PaymentStatus.REQUESTED
+                    paymentId = 99L,
+                    amount = BigDecimal("10000.00"),
+                    idempotencyKey = idempotencyKey
                 )
 
-                every { orderLookupService.requireById(1L) } returns order
-                every { paymentRepository.findByIdempotencyKey(idempotencyKey) } returns null
-                every { paymentLifecycleService.createRequested(1L, idempotencyKey, order.totalAmount) } returns requestedPayment
-                every { paymentLifecycleService.markFailed(99L, any(), any()) } returns Unit
-                every { paymentGateway.approve(order.totalAmount, idempotencyKey) } throws
+                every { orderPaymentTransactionService.preparePayOrder(PayOrderCommand(1L, idempotencyKey)) } returns
+                    preparation
+                every { paymentGateway.approve(preparation.amount, idempotencyKey) } throws
                     PaymentApprovalFailedException("PG declined: insufficient balance")
+                every { orderPaymentTransactionService.markPaymentFailed(99L, any(), any()) } returns Unit
 
                 shouldThrow<PaymentApprovalFailedException> {
                     orderUseCase.payOrder(PayOrderCommand(1L, idempotencyKey))
                 }
 
-                order.status shouldBe OrderStatus.CREATED
-                order.paidAt.shouldBeNull()
-                verify(exactly = 1) { paymentLifecycleService.markFailed(99L, any(), any()) }
-                verify(exactly = 0) { paymentLifecycleService.markApproved(any(), any(), any()) }
-                verify(exactly = 0) {
-                    compensationService.compensateApprovedPayment(
-                        paymentId = any(), paymentKey = any(), amount = any(), reason = any(), now = any()
-                    )
-                }
+                verify(exactly = 1) { orderPaymentTransactionService.markPaymentFailed(99L, any(), any()) }
+                verify(exactly = 0) { compensationService.compensateApprovedPayment(any(), any(), any(), any(), any()) }
             }
         }
 
-        When("approve는 성공했지만 outbox insert에서 실패하면") {
-            Then("시나리오 B-1 — CompensationService.compensateApprovedPayment가 REFUNDED outcome으로 호출되고 원래 예외가 전파된다") {
-                val order = sampleOrder(id = 1L)
+        When("PG approve 후 승인 기록 저장이 실패하면") {
+            Then("승인된 외부 결제를 환불 보상하고 원래 예외를 전파한다") {
                 val approvedAt = LocalDateTime.of(2026, 5, 8, 10, 0)
-                val requestedPayment = Payment(
-                    id = 77L,
+                val preparation = PayOrderPreparation.ApprovalRequired(
                     orderId = 1L,
-                    idempotencyKey = idempotencyKey,
-                    amount = order.totalAmount,
-                    status = PaymentStatus.REQUESTED
+                    paymentId = 77L,
+                    amount = BigDecimal("10000.00"),
+                    idempotencyKey = idempotencyKey
                 )
 
-                every { orderLookupService.requireById(1L) } returns order
-                every { paymentRepository.findByIdempotencyKey(idempotencyKey) } returns null
-                every { paymentLifecycleService.createRequested(1L, idempotencyKey, order.totalAmount) } returns requestedPayment
-                every { paymentGateway.approve(order.totalAmount, idempotencyKey) } returns
-                    ApproveResult(paymentKey = "MOCK-PG-b1", approvedAt = approvedAt)
-                every { paymentLifecycleService.markApproved(77L, "MOCK-PG-b1", approvedAt) } returns requestedPayment
-                every { outboxEventRepository.save(any<OutboxEvent>()) } throws
-                    RuntimeException("simulated outbox failure")
+                every { orderPaymentTransactionService.preparePayOrder(PayOrderCommand(1L, idempotencyKey)) } returns
+                    preparation
+                every { paymentGateway.approve(preparation.amount, idempotencyKey) } returns
+                    ApproveResult(paymentKey = "MOCK-PG-persist-fail", approvedAt = approvedAt)
+                every {
+                    orderPaymentTransactionService.markPaymentApproved(77L, "MOCK-PG-persist-fail", approvedAt)
+                } throws RuntimeException("approval persistence failed")
                 every {
                     compensationService.compensateApprovedPayment(
                         paymentId = 77L,
-                        paymentKey = "MOCK-PG-b1",
-                        amount = any(),
+                        paymentKey = "MOCK-PG-persist-fail",
+                        amount = preparation.amount,
                         reason = any(),
                         now = any()
                     )
@@ -271,13 +186,13 @@ class OrderUseCaseTest : BehaviorSpec({
 
                 shouldThrow<RuntimeException> {
                     orderUseCase.payOrder(PayOrderCommand(1L, idempotencyKey))
-                }.message shouldBe "simulated outbox failure"
+                }.message shouldBe "approval persistence failed"
 
                 verify(exactly = 1) {
                     compensationService.compensateApprovedPayment(
                         paymentId = 77L,
-                        paymentKey = "MOCK-PG-b1",
-                        amount = any(),
+                        paymentKey = "MOCK-PG-persist-fail",
+                        amount = preparation.amount,
                         reason = any(),
                         now = any()
                     )
@@ -285,31 +200,29 @@ class OrderUseCaseTest : BehaviorSpec({
             }
         }
 
-        When("approve는 성공했지만 outbox insert + PG refund도 실패하면") {
-            Then("시나리오 B-2 — compensateApprovedPayment가 SCHEDULED outcome으로 호출되고 (CompensationTask 등록은 service 내부) 원래 예외가 전파된다") {
-                val order = sampleOrder(id = 1L)
+        When("PG approve와 승인 기록은 성공했지만 주문 완료 트랜잭션이 실패하면") {
+            Then("환불 보상을 호출하고 원래 예외를 전파한다") {
                 val approvedAt = LocalDateTime.of(2026, 5, 8, 10, 0)
-                val requestedPayment = Payment(
-                    id = 88L,
+                val preparation = PayOrderPreparation.ApprovalRequired(
                     orderId = 1L,
-                    idempotencyKey = idempotencyKey,
-                    amount = order.totalAmount,
-                    status = PaymentStatus.REQUESTED
+                    paymentId = 88L,
+                    amount = BigDecimal("10000.00"),
+                    idempotencyKey = idempotencyKey
                 )
 
-                every { orderLookupService.requireById(1L) } returns order
-                every { paymentRepository.findByIdempotencyKey(idempotencyKey) } returns null
-                every { paymentLifecycleService.createRequested(1L, idempotencyKey, order.totalAmount) } returns requestedPayment
-                every { paymentGateway.approve(order.totalAmount, idempotencyKey) } returns
+                every { orderPaymentTransactionService.preparePayOrder(PayOrderCommand(1L, idempotencyKey)) } returns
+                    preparation
+                every { paymentGateway.approve(preparation.amount, idempotencyKey) } returns
                     ApproveResult(paymentKey = "MOCK-PG-b2", approvedAt = approvedAt)
-                every { paymentLifecycleService.markApproved(88L, "MOCK-PG-b2", approvedAt) } returns requestedPayment
-                every { outboxEventRepository.save(any<OutboxEvent>()) } throws
-                    RuntimeException("simulated outbox failure")
+                every { orderPaymentTransactionService.markPaymentApproved(88L, "MOCK-PG-b2", approvedAt) } returns Unit
+                every {
+                    orderPaymentTransactionService.completePayOrder(1L, 88L, "MOCK-PG-b2", approvedAt)
+                } throws RuntimeException("simulated outbox failure")
                 every {
                     compensationService.compensateApprovedPayment(
                         paymentId = 88L,
                         paymentKey = "MOCK-PG-b2",
-                        amount = any(),
+                        amount = preparation.amount,
                         reason = any(),
                         now = any()
                     )
@@ -317,13 +230,13 @@ class OrderUseCaseTest : BehaviorSpec({
 
                 shouldThrow<RuntimeException> {
                     orderUseCase.payOrder(PayOrderCommand(1L, idempotencyKey))
-                }
+                }.message shouldBe "simulated outbox failure"
 
                 verify(exactly = 1) {
                     compensationService.compensateApprovedPayment(
                         paymentId = 88L,
                         paymentKey = "MOCK-PG-b2",
-                        amount = any(),
+                        amount = preparation.amount,
                         reason = any(),
                         now = any()
                     )
@@ -353,21 +266,60 @@ class OrderUseCaseTest : BehaviorSpec({
 
     Given("주문 취소 요청이 들어오면") {
         When("이미 배송된 주문이면") {
-            Then("취소할 수 없다는 예외를 던진다") {
-                val order = sampleOrder(id = 3L).apply {
-                    markPaid(LocalDateTime.of(2026, 5, 6, 9, 0))
-                    markShipped(LocalDateTime.of(2026, 5, 7, 14, 0))
-                }
-
-                every { orderLookupService.requireById(3L) } returns order
-                every { cancellationRepository.findByIdempotencyKey("test-cancel-key-1") } returns null
+            Then("환불 호출 없이 준비 단계 예외를 전파한다") {
+                every { orderPaymentTransactionService.prepareCancelOrder(CancelOrderCommand(3L, "test-cancel-key-1")) } throws
+                    InvalidOrderStatusTransitionException("only created or paid orders can be cancelled. current status: SHIPPED")
 
                 val exception = shouldThrow<InvalidOrderStatusTransitionException> {
                     orderUseCase.cancelOrder(CancelOrderCommand(3L, "test-cancel-key-1"))
                 }
 
                 exception.message shouldBe "only created or paid orders can be cancelled. current status: SHIPPED"
-                verify(exactly = 1) { orderLookupService.requireById(3L) }
+                verify(exactly = 0) { paymentGateway.refund(any(), any()) }
+            }
+        }
+
+        When("PAID 주문 취소라 환불이 필요하면") {
+            Then("환불 보상 호출 후 cancellation 결과 기록을 위임한다") {
+                val result = cancelledOrderResult(id = 3L)
+                val preparation = CancelOrderPreparation.RefundRequired(
+                    result = result,
+                    cancellationId = 7L,
+                    paymentId = 99L,
+                    paymentKey = "MOCK-PG-cancel",
+                    amount = BigDecimal("10000.00"),
+                    reason = "order cancel: 고객 요청"
+                )
+                val outcome = CompensationOutcome.Refunded(LocalDateTime.of(2026, 5, 8, 11, 0))
+
+                every { orderPaymentTransactionService.prepareCancelOrder(CancelOrderCommand(3L, "cancel-key", "고객 요청")) } returns
+                    preparation
+                every {
+                    compensationService.compensateApprovedPayment(99L, "MOCK-PG-cancel", preparation.amount, preparation.reason, any())
+                } returns outcome
+                every { orderPaymentTransactionService.recordCancellationRefundOutcome(7L, outcome) } returns Unit
+
+                val actual = orderUseCase.cancelOrder(CancelOrderCommand(3L, "cancel-key", "고객 요청"))
+
+                actual.status shouldBe OrderStatus.CANCELLED
+                verify(exactly = 1) {
+                    compensationService.compensateApprovedPayment(99L, "MOCK-PG-cancel", preparation.amount, preparation.reason, any())
+                }
+                verify(exactly = 1) { orderPaymentTransactionService.recordCancellationRefundOutcome(7L, outcome) }
+            }
+        }
+
+        When("replay 또는 미결제 취소처럼 추가 외부 호출이 필요 없으면") {
+            Then("준비 단계의 결과를 그대로 반환한다") {
+                val result = cancelledOrderResult(id = 4L)
+
+                every { orderPaymentTransactionService.prepareCancelOrder(CancelOrderCommand(4L, "cancel-key")) } returns
+                    CancelOrderPreparation.Completed(result)
+
+                val actual = orderUseCase.cancelOrder(CancelOrderCommand(4L, "cancel-key"))
+
+                actual.status shouldBe OrderStatus.CANCELLED
+                verify(exactly = 0) { compensationService.compensateApprovedPayment(any(), any(), any(), any(), any()) }
             }
         }
     }
@@ -454,7 +406,24 @@ class OrderUseCaseTest : BehaviorSpec({
     }
 })
 
-private fun sampleOrder(id: Long, customerName: String = "한수진"): Order =
+private fun paidOrderResult(
+    id: Long,
+    amount: BigDecimal = BigDecimal("10000.00"),
+    approvedAt: LocalDateTime = LocalDateTime.of(2026, 5, 8, 10, 0)
+) = sampleOrder(id = id, amount = amount).apply {
+    markPaid(approvedAt)
+}.toResult()
+
+private fun cancelledOrderResult(id: Long): com.example.kotlinspringbootsample.application.order.result.OrderResult =
+    sampleOrder(id = id).apply {
+        cancel(reason = "고객 요청")
+    }.toResult()
+
+private fun sampleOrder(
+    id: Long,
+    customerName: String = "한수진",
+    amount: BigDecimal = BigDecimal("10000.00")
+): Order =
     Order(
         id = id,
         customer = Customer(id = 1L, name = customerName, email = "$customerName@example.com"),
@@ -465,7 +434,17 @@ private fun sampleOrder(id: Long, customerName: String = "한수진"): Order =
             address1 = "Seoul Gangnam-daero 1",
             address2 = "101-ho"
         )
-    )
+    ).apply {
+        replaceLines(
+            listOf(
+                com.example.kotlinspringbootsample.domain.order.OrderLineDraft(
+                    productName = "TestItem",
+                    quantity = 1,
+                    unitPrice = amount
+                )
+            )
+        )
+    }
 
 private fun statusSummaryProjection(
     orderStatus: OrderStatus,

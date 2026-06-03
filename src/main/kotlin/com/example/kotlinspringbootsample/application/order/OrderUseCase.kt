@@ -1,8 +1,6 @@
 package com.example.kotlinspringbootsample.application.order
 
-import com.example.kotlinspringbootsample.application.compensation.CompensationOutcome
 import com.example.kotlinspringbootsample.application.compensation.CompensationService
-import com.example.kotlinspringbootsample.application.payment.PaymentLifecycleService
 import com.example.kotlinspringbootsample.application.order.command.CancelOrderCommand
 import com.example.kotlinspringbootsample.application.order.command.CreateOrderCommand
 import com.example.kotlinspringbootsample.application.order.command.FindOrdersCommand
@@ -15,25 +13,15 @@ import com.example.kotlinspringbootsample.application.order.result.OrderResult
 import com.example.kotlinspringbootsample.application.order.result.OrderStatusSummaryResult
 import com.example.kotlinspringbootsample.application.order.result.OrderSummaryResult
 import com.example.kotlinspringbootsample.domain.customer.service.CustomerLookupService
-import com.example.kotlinspringbootsample.domain.order.Cancellation
 import com.example.kotlinspringbootsample.domain.order.Order
 import com.example.kotlinspringbootsample.domain.order.OrderLineDraft
 import com.example.kotlinspringbootsample.domain.order.OrderStatus
+import com.example.kotlinspringbootsample.domain.order.repository.OrderRepository
 import com.example.kotlinspringbootsample.domain.order.policy.OrderItemPolicy
 import com.example.kotlinspringbootsample.domain.order.policy.OrderStatusTransitionPolicy
-import com.example.kotlinspringbootsample.domain.order.event.OrderPaidEvent
-import com.example.kotlinspringbootsample.domain.order.repository.CancellationRepository
-import com.example.kotlinspringbootsample.domain.order.repository.OrderRepository
 import com.example.kotlinspringbootsample.domain.order.service.OrderLookupService
-import com.example.kotlinspringbootsample.domain.outbox.OutboxEvent
-import com.example.kotlinspringbootsample.domain.outbox.repository.OutboxEventRepository
-import com.example.kotlinspringbootsample.domain.payment.Payment
-import com.example.kotlinspringbootsample.domain.payment.PaymentStatus
-import com.example.kotlinspringbootsample.domain.payment.exception.IdempotencyConflictException
 import com.example.kotlinspringbootsample.domain.payment.exception.PaymentApprovalFailedException
 import com.example.kotlinspringbootsample.domain.payment.gateway.PaymentGateway
-import com.example.kotlinspringbootsample.domain.payment.repository.PaymentRepository
-import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
@@ -45,7 +33,6 @@ import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 @Service
-@Transactional(readOnly = true)
 class OrderUseCase(
     private val orderRepository: OrderRepository,
     private val customerLookupService: CustomerLookupService,
@@ -53,13 +40,10 @@ class OrderUseCase(
     private val orderItemPolicy: OrderItemPolicy,
     private val orderStatusTransitionPolicy: OrderStatusTransitionPolicy,
     private val paymentGateway: PaymentGateway,
-    private val paymentRepository: PaymentRepository,
-    private val outboxEventRepository: OutboxEventRepository,
-    private val objectMapper: ObjectMapper,
     private val compensationService: CompensationService,
-    private val cancellationRepository: CancellationRepository,
-    private val paymentLifecycleService: PaymentLifecycleService
+    private val orderPaymentTransactionService: OrderPaymentTransactionService
 ) {
+    @Transactional(readOnly = true)
     fun getOrders(command: FindOrdersCommand): Page<OrderSummaryResult> {
         val pageable = PageRequest.of(command.page, command.size, Sort.by(Sort.Direction.DESC, "createdAt"))
         val customerName = command.customerName?.takeIf(String::isNotBlank)
@@ -71,9 +55,11 @@ class OrderUseCase(
         return orders.map { it.toSummaryResult() }
     }
 
+    @Transactional(readOnly = true)
     fun getOrder(command: GetOrderCommand): OrderResult =
         orderLookupService.requireById(command.id).toResult()
 
+    @Transactional(readOnly = true)
     fun getOrderStatusSummaries(command: FindOrderStatusSummariesCommand): List<OrderStatusSummaryResult> =
         orderRepository.findStatusSummaries(
             customerName = command.customerName?.takeIf(String::isNotBlank),
@@ -100,103 +86,67 @@ class OrderUseCase(
             .toResult()
     }
 
-    @Transactional
     fun payOrder(command: PayOrderCommand): OrderResult {
-        val order = orderLookupService.requireById(command.id)
-
-        // 1. Idempotency check: 같은 키 이미 존재?
-        val existing = paymentRepository.findByIdempotencyKey(command.idempotencyKey)
-        if (existing != null) {
-            return replayExistingPayment(existing, order, command)
+        // 1. 주문 결제에 필요한 정보 조회 및 Payment.REQUESTED 저장.
+        //    이 트랜잭션은 여기서 끝나야 PG approve 동안 DB 커넥션/락을 점유하지 않는다.
+        val preparation = orderPaymentTransactionService.preparePayOrder(command)
+        if (preparation is PayOrderPreparation.Replay) {
+            return preparation.result
         }
 
-        // 2. 신규 결제: 상태 전이 검증 + Payment.REQUESTED 별도 commit (REQUIRES_NEW)
-        orderStatusTransitionPolicy.validatePayable(order)
-        val payment = paymentLifecycleService.createRequested(
-            orderId = requireNotNull(order.id),
-            idempotencyKey = command.idempotencyKey,
-            amount = order.totalAmount
-        )
-        val paymentId = requireNotNull(payment.id)
+        preparation as PayOrderPreparation.ApprovalRequired
 
-        // 3. PG.approve — 시나리오 A (실패): Payment.FAILED 별도 commit + 예외 재전파, 보상 불필요
+        // 2. PG 승인 요청.
+        //    실제 운영에서는 외부 HTTP 호출이므로 어떤 DB 트랜잭션에도 묶지 않는다.
         val approveResult = try {
-            paymentGateway.approve(order.totalAmount, command.idempotencyKey)
+            paymentGateway.approve(preparation.amount, preparation.idempotencyKey)
         } catch (e: PaymentApprovalFailedException) {
-            paymentLifecycleService.markFailed(paymentId, reason = e.message ?: "PG declined")
+            // 3-A. PG가 명시적으로 승인을 거절한 경우 Payment.FAILED audit만 별도 기록한다.
+            orderPaymentTransactionService.markPaymentFailed(
+                paymentId = preparation.paymentId,
+                reason = e.message ?: "PG declined"
+            )
             throw e
         }
 
-        // 4. Payment.APPROVED 별도 commit (REQUIRES_NEW) — 메인 롤백과 무관하게 audit 보존
-        paymentLifecycleService.markApproved(paymentId, approveResult.paymentKey, approveResult.approvedAt)
-
-        // 5. 시나리오 B 진입: 여기 이후 실패는 모두 보상(자동 환불) 대상.
-        return try {
-            order.markPaid(approveResult.approvedAt)
-            publishOrderPaidEventToOutbox(order, payment, approveResult.paymentKey, approveResult.approvedAt)
-            order.toResult().copy(paymentKey = approveResult.paymentKey)
-        } catch (e: Exception) {
-            // 메인 트랜잭션은 롤백 예정. 보상은 별도 트랜잭션(REQUIRES_NEW).
-            compensationService.compensateApprovedPayment(
-                paymentId = paymentId,
+        try {
+            // 3-B. PG 승인 성공 audit을 먼저 독립 트랜잭션으로 확정한다.
+            //      completePayOrder와 한 트랜잭션으로 묶으면 주문/Outbox 저장 실패 시 Payment.APPROVED까지
+            //      롤백되어 승인된 외부 결제의 paymentKey/audit을 잃고 환불 보상도 불안정해진다.
+            orderPaymentTransactionService.markPaymentApproved(
+                paymentId = preparation.paymentId,
                 paymentKey = approveResult.paymentKey,
-                amount = payment.amount,
+                approvedAt = approveResult.approvedAt
+            )
+        } catch (e: Exception) {
+            // 3-C. PG는 승인했지만 승인 audit 저장이 실패한 경우 즉시 환불 보상을 시도한다.
+            compensationService.compensateApprovedPayment(
+                paymentId = preparation.paymentId,
+                paymentKey = approveResult.paymentKey,
+                amount = preparation.amount,
+                reason = "payOrder approval persistence failure: ${e.message}"
+            )
+            throw e
+        }
+
+        return try {
+            // 4. 주문 PAID 전이와 OrderPaidEvent outbox 저장은 하나의 짧은 트랜잭션으로 묶는다.
+            //    여기서 실패해도 3-B의 Payment.APPROVED audit은 남아 있어 안전하게 환불 보상할 수 있다.
+            orderPaymentTransactionService.completePayOrder(
+                orderId = preparation.orderId,
+                paymentId = preparation.paymentId,
+                paymentKey = approveResult.paymentKey,
+                approvedAt = approveResult.approvedAt
+            )
+        } catch (e: Exception) {
+            // 5. 승인 이후 주문 완료/Outbox 저장이 실패하면 이미 승인된 PG 결제를 환불 보상한다.
+            compensationService.compensateApprovedPayment(
+                paymentId = preparation.paymentId,
+                paymentKey = approveResult.paymentKey,
+                amount = preparation.amount,
                 reason = "payOrder downstream failure: ${e.message}"
             )
             throw e
-        }
-    }
-
-    private fun publishOrderPaidEventToOutbox(
-        order: Order,
-        payment: Payment,
-        paymentKey: String,
-        paidAt: java.time.LocalDateTime
-    ) {
-        val event = OrderPaidEvent(
-            eventId = UUID.randomUUID().toString(),
-            orderId = requireNotNull(order.id),
-            paymentId = requireNotNull(payment.id),
-            paymentKey = paymentKey,
-            amount = payment.amount,
-            paidAt = paidAt
-        )
-        outboxEventRepository.save(
-            OutboxEvent.pending(
-                aggregateType = OrderPaidEvent.AGGREGATE_TYPE,
-                aggregateId = event.orderId.toString(),
-                eventType = OrderPaidEvent.EVENT_TYPE,
-                payload = objectMapper.writeValueAsString(event)
-            )
-        )
-    }
-
-    private fun replayExistingPayment(
-        existing: Payment,
-        order: Order,
-        command: PayOrderCommand
-    ): OrderResult {
-        if (existing.orderId != order.id) {
-            throw IdempotencyConflictException(
-                "idempotency key already used for another order (orderId=${existing.orderId})"
-            )
-        }
-        if (existing.amount.compareTo(order.totalAmount) != 0) {
-            throw IdempotencyConflictException(
-                "idempotency key was used with a different amount (expected=${existing.amount}, requested=${order.totalAmount})"
-            )
-        }
-        return when (existing.status) {
-            PaymentStatus.APPROVED -> order.toResult().copy(paymentKey = existing.paymentKey)
-            PaymentStatus.FAILED -> throw PaymentApprovalFailedException(
-                "payment previously failed for this idempotency key"
-            )
-            PaymentStatus.REQUESTED -> throw IdempotencyConflictException(
-                "payment for this idempotency key is still in progress"
-            )
-            else -> throw IdempotencyConflictException(
-                "payment for this idempotency key is in an unrecoverable state: ${existing.status}"
-            )
         }
     }
 
@@ -209,69 +159,21 @@ class OrderUseCase(
             }
             .toResult()
 
-    @Transactional
     fun cancelOrder(command: CancelOrderCommand): OrderResult {
-        val order = orderLookupService.requireById(command.id)
-
-        // 1. Idempotency check
-        val existing = cancellationRepository.findByIdempotencyKey(command.idempotencyKey)
-        if (existing != null) {
-            return replayExistingCancellation(existing, order, command)
-        }
-
-        // 2. 신규 cancellation 전이 검증
-        orderStatusTransitionPolicy.validateCancellable(order)
-        val cancellation = cancellationRepository.save(
-            Cancellation.requested(
-                orderId = requireNotNull(order.id),
-                idempotencyKey = command.idempotencyKey,
-                reason = command.reason
-            )
-        )
-
-        val wasPaid = order.status == OrderStatus.PAID
-        order.cancel(reason = command.reason)
-
-        if (wasPaid) {
-            val approvedPayment = paymentRepository.findByOrderId(requireNotNull(order.id))
-                .firstOrNull { it.status == PaymentStatus.APPROVED }
-                ?: throw IllegalStateException("PAID order has no APPROVED payment: orderId=${order.id}")
-
-            val outcome = compensationService.compensateApprovedPayment(
-                paymentId = requireNotNull(approvedPayment.id),
-                paymentKey = requireNotNull(approvedPayment.paymentKey),
-                amount = approvedPayment.amount,
-                reason = "order cancel: ${command.reason ?: "user requested"}"
-            )
-            when (outcome) {
-                is CompensationOutcome.Refunded -> cancellation.markSucceeded(outcome.refundedAt)
-                is CompensationOutcome.Scheduled -> cancellation.markRefundFailed()
+        return when (val preparation = orderPaymentTransactionService.prepareCancelOrder(command)) {
+            is CancelOrderPreparation.Replay -> preparation.result
+            is CancelOrderPreparation.Completed -> preparation.result
+            is CancelOrderPreparation.RefundRequired -> {
+                val outcome = compensationService.compensateApprovedPayment(
+                    paymentId = preparation.paymentId,
+                    paymentKey = preparation.paymentKey,
+                    amount = preparation.amount,
+                    reason = preparation.reason
+                )
+                orderPaymentTransactionService.recordCancellationRefundOutcome(preparation.cancellationId, outcome)
+                preparation.result
             }
-        } else {
-            // CREATED 상태였음 — 환불 호출 불필요, 즉시 SUCCEEDED
-            cancellation.markSucceeded(refundedAt = null)
         }
-
-        cancellationRepository.save(cancellation)
-        return order.toResult()
-    }
-
-    private fun replayExistingCancellation(
-        existing: Cancellation,
-        order: Order,
-        command: CancelOrderCommand
-    ): OrderResult {
-        if (existing.orderId != order.id) {
-            throw IdempotencyConflictException(
-                "idempotency key already used for another order (orderId=${existing.orderId})"
-            )
-        }
-        if ((existing.reason ?: "") != (command.reason ?: "")) {
-            throw IdempotencyConflictException(
-                "idempotency key was used with a different reason (expected=${existing.reason}, requested=${command.reason})"
-            )
-        }
-        return order.toResult()
     }
 
     private fun findOrdersByDerivedQuery(
