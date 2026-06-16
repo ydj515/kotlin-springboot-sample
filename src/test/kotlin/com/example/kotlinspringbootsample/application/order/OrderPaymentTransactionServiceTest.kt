@@ -16,6 +16,7 @@ import com.example.kotlinspringbootsample.domain.outbox.repository.OutboxEventRe
 import com.example.kotlinspringbootsample.domain.payment.Payment
 import com.example.kotlinspringbootsample.domain.payment.PaymentStatus
 import com.example.kotlinspringbootsample.domain.payment.exception.IdempotencyConflictException
+import com.example.kotlinspringbootsample.domain.payment.repository.PaymentCompletionTaskRepository
 import com.example.kotlinspringbootsample.domain.payment.repository.PaymentRepository
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
@@ -35,6 +36,7 @@ class OrderPaymentTransactionServiceTest : BehaviorSpec({
 
     val orderRepository = mockk<OrderRepository>()
     val paymentRepository = mockk<PaymentRepository>()
+    val paymentCompletionTaskRepository = mockk<PaymentCompletionTaskRepository>()
     val outboxEventRepository = mockk<OutboxEventRepository>()
     val cancellationRepository = mockk<CancellationRepository>()
     val service = OrderPaymentTransactionService(
@@ -43,11 +45,18 @@ class OrderPaymentTransactionServiceTest : BehaviorSpec({
         paymentRepository = paymentRepository,
         outboxEventRepository = outboxEventRepository,
         objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule()),
-        cancellationRepository = cancellationRepository
+        cancellationRepository = cancellationRepository,
+        paymentCompletionTaskRepository = paymentCompletionTaskRepository
     )
 
     beforeTest {
-        clearMocks(orderRepository, paymentRepository, outboxEventRepository, cancellationRepository)
+        clearMocks(
+            orderRepository,
+            paymentRepository,
+            paymentCompletionTaskRepository,
+            outboxEventRepository,
+            cancellationRepository
+        )
     }
 
     Given("payOrder 준비 트랜잭션") {
@@ -93,7 +102,8 @@ class OrderPaymentTransactionServiceTest : BehaviorSpec({
                     idempotencyKey = idempotencyKey,
                     amount = BigDecimal("15000.00"),
                     status = PaymentStatus.APPROVED,
-                    paymentKey = "MOCK-PG-existing"
+                    paymentKey = "MOCK-PG-existing",
+                    approvedAt = LocalDateTime.of(2026, 5, 8, 10, 0)
                 )
 
                 every { orderRepository.findByIdAndDeletedAtIsNullForUpdate(1L) } returns order
@@ -102,7 +112,7 @@ class OrderPaymentTransactionServiceTest : BehaviorSpec({
                 val result = service.preparePayOrder(PayOrderCommand(1L, idempotencyKey))
 
                 result as PayOrderPreparation.Replay
-                result.result.paymentKey shouldBe "MOCK-PG-existing"
+                result.result.order.paymentKey shouldBe "MOCK-PG-existing"
                 verify(exactly = 0) { paymentRepository.save(any<Payment>()) }
             }
         }

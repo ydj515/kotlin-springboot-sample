@@ -167,7 +167,7 @@ paths:
       tags:
       - Orders
       summary: 주문 결제
-      description: CREATED 상태 주문을 PAID 상태로 전이합니다.
+      description: CREATED 상태 주문을 결제합니다. PG 승인 후 주문 완료 저장이 일시 실패하면 처리 중 상태와 조회 URL을 반환합니다.
       operationId: payOrder
       parameters:
       - name: id
@@ -186,6 +186,13 @@ paths:
               examples:
                 success:
                   "$ref": "#/components/examples/OrderPaySuccess"
+        '202':
+          description: 결제 승인 후 주문 처리 중
+          content:
+            application/json:
+              examples:
+                processing:
+                  "$ref": "#/components/examples/OrderPayProcessing"
         '404':
           "$ref": "#/components/responses/NotFoundResponse"
         '409':
@@ -451,8 +458,8 @@ components:
             status: PAID
             totalAmount: 154000.0
             paidAt: '2026-05-08T12:05:00'
-            shippedAt: 
-            cancelledAt: 
+            shippedAt:
+            cancelledAt:
             createdAt: '2026-05-08T11:00:00'
           pageable:
             pageNumber: 0
@@ -524,31 +531,73 @@ components:
       value:
         result: success
         code: '200'
-        message: Success
+        message: 결제 및 주문이 완료되었습니다.
         timestamp: '2026-05-08T13:00:00'
         data:
-          id: 2
-          version: 2
-          buyerUsername: alice
           status: PAID
-          recipient: Alice Kim
-          zipCode: '06236'
-          address1: Seoul Gangnam-daero 123
-          address2: 10F
-          totalAmount: 154000.0
-          items:
-          - productName: Mechanical Keyboard
-            quantity: 1
-            unitPrice: 129000.0
-            lineAmount: 129000.0
-          - productName: Palm Rest
-            quantity: 1
-            unitPrice: 25000.0
-            lineAmount: 25000.0
-          paidAt: '2026-05-08T12:05:00'
-          shippedAt: 
-          cancelledAt: 
-          createdAt: '2026-05-08T11:00:00'
+          message: 결제 및 주문이 완료되었습니다.
+          pollingUrl: /api/orders/2
+          order:
+            id: 2
+            version: 2
+            buyerUsername: alice
+            status: PAID
+            recipient: Alice Kim
+            zipCode: '06236'
+            address1: Seoul Gangnam-daero 123
+            address2: 10F
+            totalAmount: 154000.0
+            items:
+            - productName: Mechanical Keyboard
+              quantity: 1
+              unitPrice: 129000.0
+              lineAmount: 129000.0
+            - productName: Palm Rest
+              quantity: 1
+              unitPrice: 25000.0
+              lineAmount: 25000.0
+            paidAt: '2026-05-08T12:05:00'
+            paymentCompletionPendingAt:
+            shippedAt:
+            cancelledAt:
+            paymentKey: MOCK-PG-abc123
+            createdAt: '2026-05-08T11:00:00'
+    OrderPayProcessing:
+      summary: 결제 승인 후 주문 처리 중
+      value:
+        result: success
+        code: '202'
+        message: 결제는 승인되었고 주문을 처리 중입니다. 잠시 후 주문 내역에서 확인할 수 있습니다.
+        timestamp: '2026-05-08T13:00:01'
+        data:
+          status: PROCESSING
+          message: 결제는 승인되었고 주문을 처리 중입니다. 잠시 후 주문 내역에서 확인할 수 있습니다.
+          pollingUrl: /api/orders/2
+          order:
+            id: 2
+            version: 2
+            buyerUsername: alice
+            status: PAYMENT_COMPLETION_PENDING
+            recipient: Alice Kim
+            zipCode: '06236'
+            address1: Seoul Gangnam-daero 123
+            address2: 10F
+            totalAmount: 154000.0
+            items:
+            - productName: Mechanical Keyboard
+              quantity: 1
+              unitPrice: 129000.0
+              lineAmount: 129000.0
+            - productName: Palm Rest
+              quantity: 1
+              unitPrice: 25000.0
+              lineAmount: 25000.0
+            paidAt:
+            paymentCompletionPendingAt: '2026-05-08T13:00:01'
+            shippedAt:
+            cancelledAt:
+            paymentKey: MOCK-PG-abc123
+            createdAt: '2026-05-08T11:00:00'
     OrderShipSuccess:
       summary: 주문 배송 성공
       value:

@@ -33,6 +33,8 @@ object SwaggerRefs {
     const val ORDER_CREATE_SUCCESS_EXAMPLE_REF = "#/components/examples/$ORDER_CREATE_SUCCESS_EXAMPLE_NAME"
     const val ORDER_PAY_SUCCESS_EXAMPLE_NAME = "OrderPaySuccess"
     const val ORDER_PAY_SUCCESS_EXAMPLE_REF = "#/components/examples/$ORDER_PAY_SUCCESS_EXAMPLE_NAME"
+    const val ORDER_PAY_PROCESSING_EXAMPLE_NAME = "OrderPayProcessing"
+    const val ORDER_PAY_PROCESSING_EXAMPLE_REF = "#/components/examples/$ORDER_PAY_PROCESSING_EXAMPLE_NAME"
     const val ORDER_SHIP_SUCCESS_EXAMPLE_NAME = "OrderShipSuccess"
     const val ORDER_SHIP_SUCCESS_EXAMPLE_REF = "#/components/examples/$ORDER_SHIP_SUCCESS_EXAMPLE_NAME"
     const val ORDER_CANCEL_SUCCESS_EXAMPLE_NAME = "OrderCancelSuccess"

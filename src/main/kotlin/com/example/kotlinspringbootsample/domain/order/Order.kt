@@ -57,6 +57,12 @@ class Order(
     @Column(name = "paid_at")
     var paidAt: LocalDateTime? = null,
 
+    @Column(name = "payment_completion_pending_at")
+    var paymentCompletionPendingAt: LocalDateTime? = null,
+
+    @Column(name = "payment_completion_failure_reason", length = 500)
+    var paymentCompletionFailureReason: String? = null,
+
     @Column(name = "shipped_at")
     var shippedAt: LocalDateTime? = null,
 
@@ -93,6 +99,17 @@ class Order(
     fun markPaid(paidAt: LocalDateTime = LocalDateTime.now()) {
         status = OrderStatus.PAID
         this.paidAt = paidAt
+        paymentCompletionPendingAt = null
+        paymentCompletionFailureReason = null
+    }
+
+    fun markPaymentCompletionPending(
+        reason: String,
+        pendingAt: LocalDateTime = LocalDateTime.now()
+    ) {
+        status = OrderStatus.PAYMENT_COMPLETION_PENDING
+        paymentCompletionPendingAt = pendingAt
+        paymentCompletionFailureReason = reason.take(PAYMENT_COMPLETION_FAILURE_REASON_MAX_LENGTH)
     }
 
     fun markShipped(
@@ -125,5 +142,9 @@ class Order(
         totalAmount = orderLines.fold(BigDecimal.ZERO) { amount, line ->
             amount + line.lineAmount
         }
+    }
+
+    private companion object {
+        const val PAYMENT_COMPLETION_FAILURE_REASON_MAX_LENGTH = 500
     }
 }

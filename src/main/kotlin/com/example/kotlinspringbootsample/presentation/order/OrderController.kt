@@ -14,6 +14,8 @@ import com.example.kotlinspringbootsample.application.order.result.OrderLineResu
 import com.example.kotlinspringbootsample.application.order.result.OrderResult
 import com.example.kotlinspringbootsample.application.order.result.OrderStatusSummaryResult
 import com.example.kotlinspringbootsample.application.order.result.OrderSummaryResult
+import com.example.kotlinspringbootsample.application.order.result.PayOrderOutcomeStatus
+import com.example.kotlinspringbootsample.application.order.result.PayOrderResult
 import com.example.kotlinspringbootsample.config.SwaggerRefs.ORDER_CANCEL_SUCCESS_EXAMPLE_REF
 import com.example.kotlinspringbootsample.config.SwaggerRefs.ORDER_CREATE_REQUEST_EXAMPLE_REF
 import com.example.kotlinspringbootsample.config.SwaggerRefs.ORDER_CREATE_SUCCESS_EXAMPLE_REF
@@ -32,6 +34,8 @@ import com.example.kotlinspringbootsample.presentation.order.response.OrderLineR
 import com.example.kotlinspringbootsample.presentation.order.response.OrderResponse
 import com.example.kotlinspringbootsample.presentation.order.response.OrderStatusSummaryResponse
 import com.example.kotlinspringbootsample.presentation.order.response.OrderSummaryResponse
+import com.example.kotlinspringbootsample.presentation.order.response.PayOrderResponse
+import com.example.kotlinspringbootsample.presentation.order.response.PayOrderResponseStatus
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.media.Content
@@ -43,6 +47,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.data.domain.Page
 import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
@@ -192,7 +197,10 @@ class OrderController(
     fun createOrder(@RequestBody request: CreateOrderRequest): ApiResult.Success<OrderResponse> =
         ApiResult.success(orderUseCase.createOrder(request.toCommand()).toResponse(), ResultCode.CREATED)
 
-    @Operation(summary = "주문 결제", description = "CREATED 상태 주문을 PAID 상태로 전이합니다.")
+    @Operation(
+        summary = "주문 결제",
+        description = "CREATED 상태 주문을 결제합니다. PG 승인 후 주문 완료 저장이 일시 실패하면 처리 중 상태와 조회 URL을 반환합니다."
+    )
     @ApiResponses(
         value = [
             ApiResponse(
@@ -214,9 +222,13 @@ class OrderController(
             example = "550e8400-e29b-41d4-a716-446655440000"
         )
         @RequestHeader("Idempotency-Key") idempotencyKey: String
-    ): ApiResult.Success<OrderResponse> {
+    ): ResponseEntity<ApiResult.Success<PayOrderResponse>> {
         val validatedKey = validateIdempotencyKey(idempotencyKey)
-        return ApiResult.success(orderUseCase.payOrder(PayOrderCommand(id, validatedKey)).toResponse())
+        val result = orderUseCase.payOrder(PayOrderCommand(id, validatedKey))
+        val resultCode = result.toResultCode()
+        return ResponseEntity
+            .status(resultCode.status)
+            .body(ApiResult.success(result.toResponse(), resultCode, result.message))
     }
 
     private fun validateIdempotencyKey(rawKey: String): String {
@@ -336,6 +348,7 @@ private fun OrderResult.toResponse(): OrderResponse =
         orderedAt = orderedAt,
         deliveryRequestedAt = deliveryRequestedAt,
         paidAt = paidAt,
+        paymentCompletionPendingAt = paymentCompletionPendingAt,
         shippedAt = shippedAt,
         cancelledAt = cancelledAt,
         trackingNumber = trackingNumber,
@@ -356,4 +369,26 @@ private fun OrderStatusSummaryResult.toResponse(): OrderStatusSummaryResponse =
     OrderStatusSummaryResponse(
         status = status,
         count = count
+    )
+
+private fun PayOrderResult.toResultCode(): ResultCode =
+    when (status) {
+        PayOrderOutcomeStatus.PAID,
+        PayOrderOutcomeStatus.CANCELED -> ResultCode.SUCCESS
+
+        PayOrderOutcomeStatus.PROCESSING,
+        PayOrderOutcomeStatus.CANCELING -> ResultCode.ACCEPTED
+    }
+
+private fun PayOrderResult.toResponse(): PayOrderResponse =
+    PayOrderResponse(
+        status = when (status) {
+            PayOrderOutcomeStatus.PAID -> PayOrderResponseStatus.PAID
+            PayOrderOutcomeStatus.PROCESSING -> PayOrderResponseStatus.PROCESSING
+            PayOrderOutcomeStatus.CANCELING -> PayOrderResponseStatus.CANCELING
+            PayOrderOutcomeStatus.CANCELED -> PayOrderResponseStatus.CANCELED
+        },
+        message = message,
+        pollingUrl = pollingUrl,
+        order = order.toResponse()
     )

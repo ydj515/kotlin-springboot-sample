@@ -132,6 +132,11 @@ class SwaggerConfig {
 
         openApi.customizePost("/api/orders/{id}/pay") {
             setSuccessResponse("200", "주문 결제 성공", "success" to SwaggerRefs.ORDER_PAY_SUCCESS_EXAMPLE_REF)
+            setSuccessResponse(
+                "202",
+                "결제 승인 후 주문 처리 중",
+                "processing" to SwaggerRefs.ORDER_PAY_PROCESSING_EXAMPLE_REF
+            )
             setResponseRef("404", SwaggerRefs.NOT_FOUND_RESPONSE_REF)
             setResponseRef("409", SwaggerRefs.CONFLICT_RESPONSE_REF)
             setParameterExample("id", 2)
@@ -187,6 +192,10 @@ class SwaggerConfig {
         addExamples(
             SwaggerRefs.ORDER_PAY_SUCCESS_EXAMPLE_NAME,
             example("주문 결제 성공", ORDER_PAY_SUCCESS_EXAMPLE)
+        )
+        addExamples(
+            SwaggerRefs.ORDER_PAY_PROCESSING_EXAMPLE_NAME,
+            example("결제 승인 후 주문 처리 중", ORDER_PAY_PROCESSING_EXAMPLE)
         )
         addExamples(
             SwaggerRefs.ORDER_SHIP_SUCCESS_EXAMPLE_NAME,
@@ -325,7 +334,10 @@ private const val ORDER_CREATE_SUCCESS_EXAMPLE =
     """{"result":"success","code":"201","message":"Created","timestamp":"2026-05-08T13:00:00","data":{"id":5,"version":0,"buyerUsername":"alice","status":"CREATED","recipient":"Alice Kim","zipCode":"06236","address1":"Seoul Gangnam-daero 123","address2":"10F","totalAmount":154000.00,"items":[{"productName":"Mechanical Keyboard","quantity":1,"unitPrice":129000.00,"lineAmount":129000.00},{"productName":"Palm Rest","quantity":1,"unitPrice":25000.00,"lineAmount":25000.00}],"paidAt":null,"shippedAt":null,"cancelledAt":null,"createdAt":"2026-05-08T13:00:00"}}"""
 
 private const val ORDER_PAY_SUCCESS_EXAMPLE =
-    """{"result":"success","code":"200","message":"Success","timestamp":"2026-05-08T13:00:00","data":{"id":2,"version":2,"buyerUsername":"alice","status":"PAID","recipient":"Alice Kim","zipCode":"06236","address1":"Seoul Gangnam-daero 123","address2":"10F","totalAmount":154000.00,"items":[{"productName":"Mechanical Keyboard","quantity":1,"unitPrice":129000.00,"lineAmount":129000.00},{"productName":"Palm Rest","quantity":1,"unitPrice":25000.00,"lineAmount":25000.00}],"paidAt":"2026-05-08T12:05:00","shippedAt":null,"cancelledAt":null,"createdAt":"2026-05-08T11:00:00"}}"""
+    """{"result":"success","code":"200","message":"결제 및 주문이 완료되었습니다.","timestamp":"2026-05-08T13:00:00","data":{"status":"PAID","message":"결제 및 주문이 완료되었습니다.","pollingUrl":"/api/orders/2","order":{"id":2,"version":2,"buyerUsername":"alice","status":"PAID","recipient":"Alice Kim","zipCode":"06236","address1":"Seoul Gangnam-daero 123","address2":"10F","totalAmount":154000.00,"items":[{"productName":"Mechanical Keyboard","quantity":1,"unitPrice":129000.00,"lineAmount":129000.00},{"productName":"Palm Rest","quantity":1,"unitPrice":25000.00,"lineAmount":25000.00}],"paidAt":"2026-05-08T12:05:00","paymentCompletionPendingAt":null,"shippedAt":null,"cancelledAt":null,"paymentKey":"MOCK-PG-abc123","createdAt":"2026-05-08T11:00:00"}}}"""
+
+private const val ORDER_PAY_PROCESSING_EXAMPLE =
+    """{"result":"success","code":"202","message":"결제는 승인되었고 주문을 처리 중입니다. 잠시 후 주문 내역에서 확인할 수 있습니다.","timestamp":"2026-05-08T13:00:01","data":{"status":"PROCESSING","message":"결제는 승인되었고 주문을 처리 중입니다. 잠시 후 주문 내역에서 확인할 수 있습니다.","pollingUrl":"/api/orders/2","order":{"id":2,"version":2,"buyerUsername":"alice","status":"PAYMENT_COMPLETION_PENDING","recipient":"Alice Kim","zipCode":"06236","address1":"Seoul Gangnam-daero 123","address2":"10F","totalAmount":154000.00,"items":[{"productName":"Mechanical Keyboard","quantity":1,"unitPrice":129000.00,"lineAmount":129000.00},{"productName":"Palm Rest","quantity":1,"unitPrice":25000.00,"lineAmount":25000.00}],"paidAt":null,"paymentCompletionPendingAt":"2026-05-08T13:00:01","shippedAt":null,"cancelledAt":null,"paymentKey":"MOCK-PG-abc123","createdAt":"2026-05-08T11:00:00"}}}"""
 
 private const val ORDER_SHIP_SUCCESS_EXAMPLE =
     """{"result":"success","code":"200","message":"Success","timestamp":"2026-05-08T13:00:00","data":{"id":2,"version":3,"buyerUsername":"alice","status":"SHIPPED","recipient":"Alice Kim","zipCode":"06236","address1":"Seoul Gangnam-daero 123","address2":"10F","totalAmount":154000.00,"items":[{"productName":"Mechanical Keyboard","quantity":1,"unitPrice":129000.00,"lineAmount":129000.00},{"productName":"Palm Rest","quantity":1,"unitPrice":25000.00,"lineAmount":25000.00}],"paidAt":"2026-05-08T12:05:00","shippedAt":"2026-05-08T12:30:00","cancelledAt":null,"createdAt":"2026-05-08T11:00:00"}}"""

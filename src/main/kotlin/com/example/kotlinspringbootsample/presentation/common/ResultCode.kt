@@ -9,6 +9,7 @@ enum class ResultCode(
 ) {
     SUCCESS(HttpStatus.OK, "200", "Success"),
     CREATED(HttpStatus.CREATED, "201", "Created"),
+    ACCEPTED(HttpStatus.ACCEPTED, "202", "Accepted"),
     INVALID_REQUEST(HttpStatus.BAD_REQUEST, "400", "Invalid Request"),
     NOT_FOUND(HttpStatus.NOT_FOUND, "404", "Not Found"),
     CONFLICT(HttpStatus.CONFLICT, "409", "Conflict"),
@@ -29,6 +30,7 @@ enum class ResultCode(
         fun from(statusCode: Int): ResultCode =
             when (statusCode) {
                 400 -> INVALID_REQUEST
+                202 -> ACCEPTED
                 404 -> NOT_FOUND
                 409 -> CONFLICT
                 500 -> INTERNAL_ERROR

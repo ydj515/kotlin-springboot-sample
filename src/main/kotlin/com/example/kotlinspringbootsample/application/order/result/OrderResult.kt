@@ -20,6 +20,8 @@ data class OrderResult(
     val orderedAt: LocalDateTime,
     val deliveryRequestedAt: LocalDateTime?,
     val paidAt: LocalDateTime?,
+    val paymentCompletionPendingAt: LocalDateTime? = null,
+    val paymentCompletionFailureReason: String? = null,
     val shippedAt: LocalDateTime?,
     val cancelledAt: LocalDateTime?,
     val trackingNumber: String?,

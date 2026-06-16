@@ -21,6 +21,8 @@
 6. [새 기능 추가 체크리스트](./feature-addition-checklist.md)
 7. [에러 처리 가이드](./error-handling.md)
 8. [로깅 및 트레이싱 가이드](./logging-and-tracing.md)
+9. [payOrder 결제 흐름 평가](./payorder_evaluation.md)
+10. [Swagger/OpenAPI 명세](./swagger.yml)
 
 ## 문서 목록
 
@@ -33,3 +35,7 @@
 - [에러 처리 가이드](./error-handling.md)
 - [로깅 및 트레이싱 가이드](./logging-and-tracing.md)
 - [Kotlin 스타일 리뷰](./kotlin-style-review.md)
+- [payOrder 결제 흐름 평가](./payorder_evaluation.md)
+- [payOrder 유스케이스 다이어그램](./payorder-usecase.png)
+- [전체 유스케이스 다이어그램](./usecase.png)
+- [Swagger/OpenAPI 명세](./swagger.yml)

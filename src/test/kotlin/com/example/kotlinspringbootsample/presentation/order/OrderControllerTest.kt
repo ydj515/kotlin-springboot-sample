@@ -11,6 +11,7 @@ import com.example.kotlinspringbootsample.application.order.result.OrderLineResu
 import com.example.kotlinspringbootsample.application.order.result.OrderResult
 import com.example.kotlinspringbootsample.application.order.result.OrderStatusSummaryResult
 import com.example.kotlinspringbootsample.application.order.result.OrderSummaryResult
+import com.example.kotlinspringbootsample.application.order.result.PayOrderResult
 import com.example.kotlinspringbootsample.domain.order.OrderStatus
 import com.example.kotlinspringbootsample.domain.order.exception.InvalidOrderStatusTransitionException
 import com.example.kotlinspringbootsample.infrastructure.security.CustomAuthenticationManager
@@ -161,13 +162,15 @@ class OrderControllerTest(
         val idempotencyKey = "550e8400-e29b-41d4-a716-446655440000"
 
         it("Idempotency-Key 헤더와 함께 호출하면 결제 성공 응답을 반환한다") {
-            every { orderUseCase.payOrder(PayOrderCommand(1L, idempotencyKey)) } returns sampleOrderResult(
-                id = 1L,
-                version = 3L,
-                status = OrderStatus.PAID,
-                orderedAt = orderedAt,
-                paidAt = paidAt,
-                paymentKey = "MOCK-PG-abc123"
+            every { orderUseCase.payOrder(PayOrderCommand(1L, idempotencyKey)) } returns PayOrderResult.paid(
+                sampleOrderResult(
+                    id = 1L,
+                    version = 3L,
+                    status = OrderStatus.PAID,
+                    orderedAt = orderedAt,
+                    paidAt = paidAt,
+                    paymentKey = "MOCK-PG-abc123"
+                )
             )
 
             mockMvc.post("/api/orders/1/pay") {
@@ -175,10 +178,11 @@ class OrderControllerTest(
             }.andExpect {
                 status { isOk() }
                 jsonPath("$.result") { value("success") }
-                jsonPath("$.data.version") { value(3) }
                 jsonPath("$.data.status") { value("PAID") }
-                jsonPath("$.data.paidAt") { value("2026-05-08T12:05:00") }
-                jsonPath("$.data.paymentKey") { value("MOCK-PG-abc123") }
+                jsonPath("$.data.order.version") { value(3) }
+                jsonPath("$.data.order.status") { value("PAID") }
+                jsonPath("$.data.order.paidAt") { value("2026-05-08T12:05:00") }
+                jsonPath("$.data.order.paymentKey") { value("MOCK-PG-abc123") }
             }
 
             verify { orderUseCase.payOrder(PayOrderCommand(1L, idempotencyKey)) }

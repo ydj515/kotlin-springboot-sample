@@ -2,10 +2,10 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** [`2026-05-15-payment-feature-design.md`](../specs/2026-05-15-payment-feature-design.md)에 정의된 결제 흐름을 양쪽 샘플(kotlin-jpa, java-mybatis)에 동일한 Facade 구조로 점진적 도입한다.
+**Goal:** [`2026-05-15-payment-feature-design.md`](../specs/2026-05-15-payment-feature-design.md)에 정의된 결제 흐름을 세 샘플(kotlin-jpa, java-jooq, java-mybatis)에 동일한 Facade 구조로 점진적 도입한다.
 
 **Strategy:**
-- 레벨별 양쪽 샘플 동시 진행 (Level N kotlin + Level N java 끝낸 후 Level N+1로)
+- 레벨별 세 샘플 동시 진행 (Level N kotlin + Level N java-jooq + Level N java-mybatis 끝낸 후 Level N+1로)
 - 각 레벨 안에서는: schema → domain → application → presentation → test → http 순
 - 매 레벨 종료 시 양쪽 build + 통합 테스트 통과 확인
 - 양쪽 모두 task-unit commit (refactor/feat/test/chore 분리)
@@ -103,7 +103,7 @@
 ### Task 1.6: Level 1 commit & verify
 - [ ] kotlin commit: `feat: introduce PaymentGateway mock and wire approve into payOrder`
 - [ ] java-mybatis commit: `feat: introduce PaymentGateway mock and wire approve into pay use case`
-- [ ] 양쪽 full build/test 통과
+- [ ] 세 레포 full build/test 통과
 
 ---
 
@@ -334,12 +334,14 @@
   - PG_REFUND task: payload deserialization → PG.refund 시도 → 성공 시 task.markSuccess + Payment.markRefunded / 실패 시 task.markRetry(error, exp_backoff) 또는 max retry 초과 시 task.markFailed + log.error
 - [ ] **Step 4: 단위 테스트** — PG mock으로 4가지 케이스 검증 (refund 성공/실패, retry 성공/실패)
 
-### Task 5.6: OrderUseCase.payOrder 보상 trigger 통합
+### Task 5.6: OrderUseCase.payOrder completion retry 통합
 - [ ] **Step 1: `CompensationService` 주입**
 - [ ] **Step 2: 외부 try (PG.approve)** — `PaymentApprovalFailedException`만 catch → Payment.markFailed → throw (시나리오 A)
-- [ ] **Step 3: 내부 try (Payment.markApproved 이후 모든 DB 작업)** — Exception catch → `compensationService.compensateApprovedPayment(...)` 호출 후 re-throw (시나리오 B)
-- [ ] **Step 4: 단위 테스트** — DB 실패 mock으로 시나리오 B 흐름 검증
-- [ ] **Step 5: 통합 테스트 (MySQL)** — `@MockkBean OrderRepository` 강제 실패 → 메인 트랜잭션 롤백 + compensation REQUIRES_NEW 별도 commit 확인 (Payment.REFUNDED 또는 REFUND_FAILED + CompensationTask PENDING)
+- [ ] **Step 3: 내부 try (Payment.markApproved 이후 Order.PAID + Outbox 저장)** — recoverable Exception catch → `Order.PAYMENT_COMPLETION_PENDING` + `PaymentCompletionTask` 저장 후 202 PROCESSING 반환
+- [ ] **Step 4: 복구 불가 또는 pending 저장 실패** — `compensationService.compensateApprovedPayment(...)`로 환불 보상 진행 후 CANCELING 응답
+- [ ] **Step 5: 단위 테스트** — outbox 저장 실패 mock으로 PROCESSING 흐름 검증
+- [ ] **Step 6: 통합 테스트 (MySQL)** — outbox 저장 실패 → pending task 생성 → worker 재시도 성공/한도 초과 후 compensation 확인
+- [ ] **Step 7: `PaymentCompletionRetryWorker` 구현** — `payment_completion_tasks`를 claim → `completePayOrder` 재시도 → 성공 시 task.SUCCESS, 한도 초과/복구 불가 시 refund 보상
 
 ### Task 5.7: OrderUseCase.cancelOrder + idempotency
 - [ ] **Step 1: `CancelOrderCommand`에 `idempotencyKey`, `reason` 필드 추가**
@@ -366,7 +368,7 @@
 **Files (kotlin):**
 - Create: `infrastructure/compensation/CompensationRetryWorker.kt`
 
-**Files (java-mybatis):**
+**Files (java-jooq/java-mybatis):**
 - Create: `infrastructure/compensation/CompensationRetryWorker.java`
 
 - [ ] **Step 1: `@Component @Scheduled(fixedDelayString = "${app.compensation.worker.fixed-delay-ms:1000}")`**
@@ -377,8 +379,8 @@
 
 ### Task 5.9: 통합 테스트 (MySQL)
 - [ ] **시나리오 A (PG approve 실패)**: PG mock 실패 → Payment.FAILED + 보상 호출 안 됨
-- [ ] **시나리오 B-1 (refund 성공)**: PG approve 성공 + Repository 강제 실패 → refund 호출 → Payment.REFUNDED + CompensationTask 없음
-- [ ] **시나리오 B-2 (refund 실패)**: PG approve 성공 + Repository 실패 + PG refund 실패 → Payment.REFUND_FAILED + CompensationTask PENDING 1건
+- [ ] **시나리오 B-1 (completion retry 성공)**: PG approve 성공 + Outbox 저장 실패 → Order.PAYMENT_COMPLETION_PENDING + PaymentCompletionTask.PENDING → worker 재시도 성공 → Order.PAID + task.SUCCESS
+- [ ] **시나리오 B-2 (completion retry 한도 초과 + refund 실패)**: retry 한도 초과 → PG refund 실패 → Payment.REFUND_FAILED + CompensationTask PENDING 1건
 - [ ] **시나리오 C-1 (cancel PAID, refund 성공)**: PAID 상태에서 cancel → Order.CANCELLED + Payment.REFUNDED
 - [ ] **시나리오 C-2 (cancel PAID, refund 실패)**: PAID 상태에서 cancel + refund 실패 → Order.CANCELLED + cancellation.REFUND_FAILED + CompensationTask PENDING
 - [ ] **시나리오 D (cancel CREATED)**: CREATED에서 cancel → Order.CANCELLED, refund 호출 안 됨

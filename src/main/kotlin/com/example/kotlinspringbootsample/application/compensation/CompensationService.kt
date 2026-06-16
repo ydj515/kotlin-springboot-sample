@@ -27,6 +27,11 @@ class CompensationService(
         reason: String,
         now: LocalDateTime = LocalDateTime.now()
     ): CompensationOutcome {
+        if (compensationTransactionService.isPaymentRefunded(paymentId)) {
+            log.info("compensation skipped because payment is already refunded: paymentId={}", paymentId)
+            return CompensationOutcome.Refunded(now)
+        }
+
         return try {
             val result = paymentGateway.refund(paymentKey, amount)
             compensationTransactionService.recordRefundSucceeded(paymentId, result.refundedAt, reason)

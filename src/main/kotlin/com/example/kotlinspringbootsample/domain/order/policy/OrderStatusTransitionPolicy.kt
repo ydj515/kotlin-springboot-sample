@@ -15,6 +15,14 @@ class OrderStatusTransitionPolicy {
         }
     }
 
+    fun validatePaymentCompletable(order: Order) {
+        if (order.status !in setOf(OrderStatus.CREATED, OrderStatus.PAYMENT_COMPLETION_PENDING)) {
+            throw InvalidOrderStatusTransitionException(
+                "only created or payment completion pending orders can be completed. current status: ${order.status}"
+            )
+        }
+    }
+
     fun validateShippable(order: Order) {
         if (order.status != OrderStatus.PAID) {
             throw InvalidOrderStatusTransitionException(

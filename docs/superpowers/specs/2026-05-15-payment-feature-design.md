@@ -2,7 +2,7 @@
 
 ## 개요
 
-주문(Order)에 실제 결제 흐름을 붙여, **UseCase가 다층 서브시스템을 조율하는 Facade 패턴**을 양 샘플(kotlin-jpa, java-mybatis)에서 동일하게 보여준다. 결제는 단순 status 전이가 아닌, PG 호출 / 결제 이력 / 도메인 이벤트 발행 / 보상 트랜잭션까지 production-grade 패턴을 점진적으로 도입한다.
+주문(Order)에 실제 결제 흐름을 붙여, **UseCase가 다층 서브시스템을 조율하는 Facade 패턴**을 세 샘플(kotlin-jpa, java-jooq, java-mybatis)에서 동일하게 보여준다. 결제는 단순 status 전이가 아닌, PG 호출 / 결제 이력 / 도메인 이벤트 발행 / 보상 트랜잭션까지 production-grade 패턴을 점진적으로 도입한다.
 
 ## 배경
 
@@ -16,9 +16,9 @@
 이 모든 것을 한 UseCase 메서드 뒤에 숨기는 게 Facade의 본질이다.
 
 또한 cross-sample 학습 가치 극대화:
-- 같은 Facade가 JPA vs MyBatis 영속화 차이를 어떻게 흡수하는지
-- 같은 도메인 이벤트가 두 ORM에서 어떻게 발행/소비되는지
-- 같은 outbox 패턴이 두 영속성 기술에서 어떻게 구현되는지
+- 같은 Facade가 JPA, jOOQ, MyBatis 영속화 차이를 어떻게 흡수하는지
+- 같은 도메인 이벤트가 세 영속성 구현에서 어떻게 발행/소비되는지
+- 같은 outbox 패턴이 세 영속성 기술에서 어떻게 구현되는지
 
 ## 목표
 
@@ -28,10 +28,36 @@
 - 멱등성을 통해 중복 결제 요청을 안전하게 처리한다.
 - 결제 성공 시 도메인 이벤트를 안전하게 발행한다(transactional outbox).
 - 발행된 이벤트를 다른 컴포넌트가 멱등하게 소비하는 패턴을 보여준다.
-- PG 승인 후 DB 실패 시 자동 환불(compensation)을 시도한다.
+- PG 승인 후 주문 완료/Outbox 저장이 일시 실패하면 `PAYMENT_COMPLETION_PENDING`으로 내구화하고, worker 재시도 후 복구 불가 또는 한도 초과 시 자동 환불(compensation)을 시도한다.
+
+## 2026-06-11 정책 업데이트: 승인 후 즉시 환불보다 completion retry 우선
+
+Stripe/PayPal/Adyen/Toss Payments의 공개 API 패턴처럼 결제 승인 상태와 상점 내부 주문 완료 상태를 분리한다. PG 승인 성공은 `Payment.APPROVED`로 먼저 감사 기록을 남기고, `Order.PAID + OrderPaidEvent Outbox` 저장이 실패하면 즉시 환불하지 않는다. 대신 `Order.PAYMENT_COMPLETION_PENDING`과 `payment_completion_tasks`를 같은 짧은 트랜잭션으로 저장하고, `PaymentCompletionRetryWorker`가 주문 완료를 재시도한다.
+
+최종 흐름:
+
+```text
+Payment.REQUESTED
+-> PG approve
+-> Payment.APPROVED
+-> Order.PAID + OrderPaidEvent Outbox 시도
+-> 성공: 200 PAID
+-> 일시 실패: 202 PROCESSING + Order.PAYMENT_COMPLETION_PENDING + completion task
+-> worker 재시도 성공: Order.PAID
+-> 복구 불가 또는 retry 한도 초과: PG refund 보상 + CompensationTask
+```
+
+고객 응답도 내부 상태에 맞춰 분리한다.
+
+| 내부 상태 | HTTP | pay API 응답 |
+|---|---:|---|
+| 주문 완료 성공 | 200 | `status=PAID`, `order.status=PAID` |
+| 결제 승인, 주문 완료 재시도 중 | 202 | `status=PROCESSING`, `order.status=PAYMENT_COMPLETION_PENDING`, `pollingUrl=/api/orders/{id}` |
+| 복구 불가로 환불 보상 진행 | 202 | `status=CANCELING` |
+| 이미 환불 완료된 멱등 replay | 200 | `status=CANCELED` |
 
 ### 2. 학습 목표 (cross-sample)
-- UseCase = Facade임을 두 ORM에서 동일하게 드러낸다.
+- UseCase = Facade임을 세 영속성 구현에서 동일하게 드러낸다.
 - production에서 마주치는 결제 시스템 패턴(outbox, idempotent consumer, saga)을 익힌다.
 - JPA aggregate 흐름과 MyBatis explicit mapping의 차이를 다층 시나리오에서 관찰한다.
 
@@ -157,7 +183,7 @@
 
 **범위**
 - 시나리오 A (PG approve 실패): `Payment.markFailed` → 보상 불필요
-- 시나리오 B (PG approve 성공 → DB 실패): 자동 PG.refund 시도 → 성공 시 `Payment.REFUNDED` / 실패 시 `CompensationTask` 등록 + `Payment.REFUND_FAILED`
+- 시나리오 B (PG approve 성공 → Order.PAID/Outbox 저장 실패): `Order.PAYMENT_COMPLETION_PENDING` + `PaymentCompletionTask` 등록 → worker 재시도 → 한도 초과 또는 복구 불가 시 PG.refund 보상 → 실패 시 `CompensationTask` 등록 + `Payment.REFUND_FAILED`
 - 시나리오 C (cancel on PAID order): PG.refund 호출 → 성공 시 `Payment.REFUNDED` + `Order.CANCELLED` / 실패 시 동일 보상 패턴
 - 시나리오 D (cancel on CREATED, 미결제): refund 호출 없음 → `Order.CANCELLED`만
 - 신규 테이블: `compensation_tasks`, `cancellations`
@@ -191,23 +217,25 @@ val approveResult = try {
     throw e  // 시나리오 A — 보상 불필요
 }
 
-// 시나리오 B 진입: 여기 이후 실패는 모두 보상 대상
+// 시나리오 B 진입: 승인 audit은 먼저 남기고, 주문 완료는 복구 가능한 작업으로 처리
 try {
     payment.markApproved(approveResult.paymentKey, approveResult.approvedAt)
     paymentRepository.save(payment)
     order.markPaid(approveResult.approvedAt)
     orderRepository.save(order)
     publishOrderPaidEventToOutbox(order, payment)
-    return OrderResult.from(order, payment)
+    return PayOrderResult.paid(order)
 } catch (e: Exception) {
-    // 메인 트랜잭션은 롤백 예정. 보상은 별도 트랜잭션으로.
-    compensationService.compensateApprovedPayment(
+    // 주문 완료/Outbox 저장 실패는 먼저 pending + durable retry로 남긴다.
+    orderPaymentTransactionService.markPaymentCompletionPendingAndSchedule(
+        orderId = order.id!!,
         paymentId = payment.id!!,
         paymentKey = approveResult.paymentKey,
         amount = payment.amount,
-        reason = "payOrder downstream failure: ${e.message}"
+        approvedAt = approveResult.approvedAt,
+        reason = "payOrder completion failure: ${e.message}"
     )
-    throw e
+    return PayOrderResult.processing(order)
 }
 ```
 
@@ -243,21 +271,21 @@ try {
 - 운영자 개입 시: 수동으로 `status=PENDING + retry_count=0`으로 갱신 → worker가 재처리
 - 운영 알림: `OncallAlerter` 같은 인터페이스 + Slack/Email integration은 **본 샘플 범위 외**. 후속 학습 과제 (운영 고려사항 섹션 참조)
 
-#### 5.5 시나리오별 Payment / Order / CompensationTask 상태 매트릭스
+#### 5.5 시나리오별 Payment / Order / PaymentCompletionTask / CompensationTask 상태 매트릭스
 
-| 시나리오 | Payment.status 종결 | Order.status 종결 | CompensationTask | 후속 |
-|---|---|---|---|---|
-| A. PG approve 실패 | FAILED | (변경 없음) | 없음 | 클라이언트 재요청은 **새 Idempotency-Key + 새 Payment** |
-| B-1. approve 성공, DB 실패, refund 성공 | REFUNDED | (변경 없음, 메인 롤백) | 없음 | 클라이언트는 5xx 받음. payOrder 재요청은 새 키로 |
-| B-2. approve 성공, DB 실패, refund 실패 | REFUND_FAILED | (변경 없음) | PG_REFUND PENDING | Worker 재시도. 성공 시 Payment.REFUNDED + task SUCCESS, max retry 초과 시 task FAILED |
-| C-1. cancel(PAID), refund 성공 | REFUNDED | CANCELLED | 없음 | cancellation.status=SUCCEEDED |
-| C-2. cancel(PAID), refund 실패 | REFUND_FAILED | CANCELLED | PG_REFUND PENDING | cancellation.status=REFUND_FAILED. Worker 재시도 |
-| D. cancel(CREATED, 미결제) | (해당 Payment 없음) | CANCELLED | 없음 | refund 호출 안 함 |
+| 시나리오 | Payment.status 종결 | Order.status 종결 | PaymentCompletionTask | CompensationTask | 후속 |
+|---|---|---|---|---|---|
+| A. PG approve 실패 | FAILED | (변경 없음) | 없음 | 없음 | 클라이언트 재요청은 **새 Idempotency-Key + 새 Payment** |
+| B-1. approve 성공, 주문 완료/Outbox 일시 실패 | APPROVED | PAYMENT_COMPLETION_PENDING → PAID | PENDING → SUCCESS | 없음 | 클라이언트는 202 PROCESSING. worker가 `completePayOrder` 재시도 |
+| B-2. approve 성공, 주문 완료/Outbox 재시도 한도 초과 + refund 실패 | REFUND_FAILED | PAYMENT_COMPLETION_PENDING | FAILED | PG_REFUND PENDING | 보상 worker가 refund 재시도. 성공 시 Payment.REFUNDED + compensation task SUCCESS |
+| C-1. cancel(PAID), refund 성공 | REFUNDED | CANCELLED | 없음 | 없음 | cancellation.status=SUCCEEDED |
+| C-2. cancel(PAID), refund 실패 | REFUND_FAILED | CANCELLED | 없음 | PG_REFUND PENDING | cancellation.status=REFUND_FAILED. Worker 재시도 |
+| D. cancel(CREATED, 미결제) | (해당 Payment 없음) | CANCELLED | 없음 | 없음 | refund 호출 안 함 |
 
-> **짧은 DB 트랜잭션 + 외부 PG 호출 분리 근거 (Stripe PaymentIntent 패턴)**:
-> `OrderUseCase.payOrder`는 트랜잭션을 열지 않는 오케스트레이션 계층으로 두고, `OrderPaymentTransactionService`가 `Payment.REQUESTED` 저장, `Payment.APPROVED`/`FAILED` 기록, `Order.markPaid + OutboxEvent.save`를 각각 짧은 트랜잭션으로 처리한다. PG approve/refund는 어떤 DB 트랜잭션 안에서도 호출하지 않는다. 이렇게 해야 외부 호출 지연으로 DB 커넥션/락을 오래 점유하지 않으면서도 Payment audit을 보존할 수 있다.
+> **OrderPaymentTransactionService 도입 근거 (Stripe PaymentIntent 패턴)**:
+> `OrderUseCase.payOrder`는 트랜잭션 없이 결제 흐름을 조율하고, `OrderPaymentTransactionService`가 `preparePayOrder`, `markPaymentApproved`, `markPaymentFailed`, `completePayOrder`, `markPaymentCompletionPendingAndSchedule`의 짧은 DB 트랜잭션만 담당한다. 이렇게 해야 PG approve 같은 외부 호출 동안 DB 커넥션/락을 점유하지 않으면서도, 시나리오 A/B에서 Payment audit과 주문/Outbox 저장 경계를 분리해 매트릭스대로 검증할 수 있다.
 >
-> 참고: `compensateApprovedPayment`도 PG.refund를 먼저 트랜잭션 밖에서 호출하고, 환불 성공/실패 기록과 CompensationTask 등록만 짧은 트랜잭션으로 수행한다.
+> 참고: `compensateApprovedPayment`도 트랜잭션 없이 PG.refund를 먼저 수행하고, 환불 결과 기록과 CompensationTask 등록만 `CompensationTransactionService`의 짧은 트랜잭션으로 처리한다.
 
 #### 5.6 cancellations 테이블 schema
 
@@ -302,64 +330,79 @@ compensation_tasks
 | `OrderPaymentTransactionService.preparePayOrder` | REQUIRED | 주문 row를 `PESSIMISTIC_WRITE`로 짧게 잠그고 Payment.REQUESTED 저장. 동일 주문의 REQUESTED/APPROVED payment가 있으면 차단 |
 | `OrderPaymentTransactionService.markPaymentFailed` | REQUIRED | PG approve 명시 실패 시 Payment.FAILED 기록 |
 | `OrderPaymentTransactionService.markPaymentApproved` | REQUIRED | PG approve 성공 후 Payment.APPROVED audit 기록 |
-| `OrderPaymentTransactionService.completePayOrder` | REQUIRED | Order.markPaid + OutboxEvent.save 원자 처리. 실패 시 호출자는 refund 보상 |
+| `OrderPaymentTransactionService.completePayOrder` | REQUIRED | Order PAID 전이 + OutboxEvent.save만 하나의 짧은 트랜잭션으로 보호 |
+| `OrderPaymentTransactionService.markPaymentCompletionPendingAndSchedule` | REQUIRED | Order.PAYMENT_COMPLETION_PENDING + PaymentCompletionTask 저장 |
 | `OrderUseCase.cancelOrder` | 없음 | 취소 오케스트레이션. PG.refund는 트랜잭션 밖에서 호출 |
 | `OrderPaymentTransactionService.prepareCancelOrder` | REQUIRED | cancellation insert + Order CANCELLED 전이를 짧은 트랜잭션으로 처리 |
+| `OrderPaymentTransactionService.recordCancellationRefundOutcome` | REQUIRED | 환불 결과에 따라 cancellation.status 기록 |
 | `CompensationService.compensateApprovedPayment` | 없음 | PG.refund를 트랜잭션 밖에서 호출 |
 | `CompensationTransactionService.*` | REQUIRES_NEW/readonly | 환불 결과 기록, CompensationTask claim/update만 짧은 트랜잭션으로 처리 |
 | `CompensationRetryWorker.runBatch` | 없음 | task claim 후 PG.refund 재시도는 트랜잭션 밖에서 수행 |
+| `PaymentCompletionRetryWorker.runBatch` | 없음 | PaymentCompletionTask claim 후 `completePayOrder` 재시도, 한도 초과/복구 불가 시 refund 보상 |
 | `OutboxPublisher.publish` (배치 단위) | REQUIRES_NEW | (Level 3 기존) |
 | `ProcessedEventService.tryMarkProcessed` | REQUIRES_NEW | 이벤트 dedup 기록만 짧은 트랜잭션으로 처리. SMS 전송은 트랜잭션 밖에서 수행 |
 
-#### 5.9 테스트 전략 — DB 실패 시뮬레이션
+#### 5.9 테스트 전략 — completion retry 시뮬레이션
 
 **kotlin (Kotest + MockK)**:
 ```kotlin
-@MockkBean lateinit var orderRepository: OrderRepository
-every { orderRepository.save(any()) } throws DataAccessException("simulated")
+@MockkBean lateinit var outboxEventRepository: OutboxEventRepository
+every { outboxEventRepository.save(any()) } throws DataAccessException("simulated")
 
-shouldThrow<DataAccessException> { orderUseCase.payOrder(command) }
+val result = orderUseCase.payOrder(command)
 
 // 검증
-verify { paymentGateway.refund(approveResult.paymentKey, amount) }
+result.status shouldBe PayOrderOutcomeStatus.PROCESSING
 val payment = paymentRepository.findByIdempotencyKey(key)!!
-payment.status shouldBe PaymentStatus.REFUNDED
+payment.status shouldBe PaymentStatus.APPROVED
+paymentCompletionTaskRepository.findAll().single().status shouldBe PaymentCompletionTaskStatus.PENDING
+
+every { outboxEventRepository.save(any()) } answers { firstArg() }
+paymentCompletionRetryWorker.runBatch()
+
+orderRepository.findById(orderId).get().status shouldBe OrderStatus.PAID
+paymentCompletionTaskRepository.findAll().single().status shouldBe PaymentCompletionTaskStatus.SUCCESS
 ```
 
 **java-mybatis (JUnit 5 + Mockito)**:
 ```java
-@MockBean OrderMapper orderMapper;
-when(orderMapper.updateStatusToPaid(...)).thenThrow(new DataAccessException("simulated") {});
+@MockBean OutboxEventRepository outboxEventRepository;
+given(outboxEventRepository.save(any())).willThrow(new RuntimeException("simulated"));
 
-assertThatThrownBy(() -> orderUseCase.pay(orderId, key))
-    .isInstanceOf(DataAccessException.class);
+PayOrderResult result = orderUseCase.payOrder(orderId, key);
 
-verify(paymentGateway).refund(approveResult.paymentKey(), amount);
+assertThat(result.status()).isEqualTo(PayOrderOutcomeStatus.PROCESSING);
 Payment payment = paymentRepository.findByIdempotencyKey(key).orElseThrow();
-assertThat(payment.getStatus()).isEqualTo(PaymentStatus.REFUNDED);
+assertThat(payment.getStatus()).isEqualTo(PaymentStatus.APPROVED);
+
+given(outboxEventRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
+paymentCompletionRetryWorker.runBatch();
+
+assertThat(orderRepository.findById(orderId).getStatus()).isEqualTo(OrderStatus.PAID);
 ```
 
-refund도 mock으로 실패시키면 `compensation_tasks` PENDING 레코드 1건이 별도 트랜잭션으로 저장됐는지 확인 (REQUIRES_NEW가 메인 롤백과 독립 commit하는지 검증).
+completion retry 한도 초과 후 refund도 mock으로 실패시키면 `payment_completion_tasks.status = FAILED`와 `compensation_tasks` PENDING 레코드 1건이 별도 트랜잭션으로 저장됐는지 확인한다.
 
-## 두 샘플의 비교 포인트
+## 세 샘플의 비교 포인트
 
-| 측면 | kotlin (JPA) | java-mybatis (MyBatis) |
-|---|---|---|
-| Payment 저장 | `PaymentRepository : JpaRepository<Payment, Long>` + save | `PaymentMapper extends PaymentRepository` + xml insert |
-| PaymentHistory 저장 | aggregate 안에서 cascade 또는 별도 save | 명시적 insertHistory 호출 |
-| Outbox SELECT FOR UPDATE SKIP LOCKED | `@Query` + nativeQuery | `<select>` + raw SQL |
-| Outbox 동시성 격리 수준 | `@Transactional(isolation = ...)` | 동일 |
-| ApplicationEventPublisher 사용 | 동일 | 동일 |
-| 도메인 이벤트 정의 | Kotlin data class | Java record |
-| compensation_tasks 처리 | JpaRepository + custom update | Mapper + update xml |
-| cancellation 저장 | JpaRepository | Mapper + xml |
-| CompensationService 빈 분리 | 동일 (`@Service`) | 동일 |
-| Facade(UseCase) 시그니처 | 동일 | 동일 |
-| Transaction propagation | 동일 (`@Transactional(REQUIRES_NEW)` 등) | 동일 |
+| 측면 | kotlin (JPA) | java-jooq (jOOQ) | java-mybatis (MyBatis) |
+|---|---|---|---|
+| Payment 저장 | `JpaRepository<Payment, Long>` + save | jOOQ repository adapter + generated table | Mapper XML + repository adapter |
+| PaymentHistory 저장 | aggregate history cascade 또는 repository save | 명시적 insert/update DSL | 명시적 insertHistory mapper |
+| Outbox SELECT FOR UPDATE SKIP LOCKED | `@Query` + nativeQuery | jOOQ `forUpdate().skipLocked()` | XML raw SQL |
+| Outbox 동시성 격리 수준 | `@Transactional` + native lock | `@Transactional` + jOOQ lock | `@Transactional` + MyBatis lock |
+| ApplicationEventPublisher 사용 | 동일 | 동일 | 동일 |
+| 도메인 이벤트 정의 | Kotlin data class | Java record/class | Java record/class |
+| payment_completion_tasks 처리 | JpaRepository + native claim query | jOOQ repository adapter | Mapper XML + repository adapter |
+| compensation_tasks 처리 | JpaRepository + custom update | jOOQ repository adapter | Mapper XML + repository adapter |
+| cancellation 저장 | JpaRepository | jOOQ repository adapter | Mapper XML + repository adapter |
+| CompensationService 빈 분리 | 동일 (`@Service`) | 동일 | 동일 |
+| Facade(UseCase) 역할 | 동일 | 동일 | 동일 |
+| Transaction propagation | 동일한 경계 원칙 | 동일한 경계 원칙 | 동일한 경계 원칙 |
 
 **학습 포인트의 핵심**:
 - application 계층(Facade) 모양은 거의 동일 → 추상화의 힘
-- infrastructure 계층(repository/mapper)에서만 차이 → 영속성 기술 차이의 위치 명확화
+- infrastructure 계층(repository/adapter/mapper)에서만 차이 → 영속성 기술 차이의 위치 명확화
 
 ## 공통 아키텍처 규약 적용
 
@@ -378,7 +421,7 @@ refund도 mock으로 실패시키면 `compensation_tasks` PENDING 레코드 1건
 | 3 | `payOrder`: 위 + OutboxEvent insert (모두 같은 트랜잭션, atomicity 보장) |
 | 3 | `OutboxPublisher.publish`: PENDING SELECT FOR UPDATE SKIP LOCKED → publish → status PUBLISHED 업데이트 (배치 1건 = 1 트랜잭션) |
 | 4 | `OrderPaidEventListener.handle`: ProcessedEvent insert (UNIQUE 충돌 시 abort) → SMS 전송 (별도 트랜잭션 - REQUIRES_NEW) |
-| 5 | `payOrder` 안에서 PG.approve 후 DB 실패 catch → 별도 트랜잭션으로 PG.refund 호출 → 실패 시 CompensationTask insert |
+| 5 | `payOrder` 안에서 PG.approve 후 주문 완료/Outbox 실패 catch → PaymentCompletionTask로 completion retry → 한도 초과/복구 불가 시 PG.refund 보상 |
 
 ## Payment aggregate 설계 결정 (Level 2 진입 전 확정)
 
@@ -393,7 +436,7 @@ refund도 mock으로 실패시키면 `compensation_tasks` PENDING 레코드 1건
 
 **구현**:
 - kotlin: `class Payment(val orderId: Long, ...)`, `@Column(name = "order_id") val orderId: Long`. NO `@ManyToOne`.
-- java-mybatis: `private Long orderId;` + Mapper에서 SELECT/INSERT 시 단순 컬럼
+- java-jooq/java-mybatis: `private Long orderId;` + repository adapter/mapper에서 SELECT/INSERT 시 단순 컬럼
 
 **비고**:
 - Order → Payment 역참조도 동일 원칙 (`Order`는 `paymentIds`나 nothing). 학습용으로는 Order가 Payment를 모르는 게 깔끔.
@@ -436,13 +479,13 @@ refund도 mock으로 실패시키면 `compensation_tasks` PENDING 레코드 1건
 - UseCase 코드가 매번 history 호출하는 부담/누락 위험 제거
 - transaction 안에서 atomic 보장
 
-**JPA vs MyBatis 차이**:
+**JPA vs jOOQ vs MyBatis 차이**:
 
-| 측면 | kotlin (JPA) | java-mybatis (MyBatis) |
-|---|---|---|
-| in-memory 누적 | `Payment.histories: MutableList<PaymentHistory>` (transient or @OneToMany) | `Payment.histories: List<PaymentHistory>` (transient field, MyBatis는 자동 매핑 안 함) |
-| 영속화 | `@OneToMany(cascade = CascadeType.ALL, orphanRemoval = true)` — Payment.save 시 cascade | `PaymentRepository.save(payment)` 내부 구현에서 paymentMapper.update + 새로 추가된 histories만 paymentHistoryMapper.insertHistory |
-| 기존 history vs 신규 | JPA가 알아서 detect (transient = new) | 신규 추가된 항목만 추적하기 위해 Payment에 `newlyAddedHistories` 같은 transient list 별도 관리 |
+| 측면 | kotlin (JPA) | java-jooq (jOOQ) | java-mybatis (MyBatis) |
+|---|---|---|---|
+| in-memory 누적 | `Payment.histories: MutableList<PaymentHistory>` | `Payment.histories`를 도메인 모델에 누적 | `Payment.histories`를 도메인 모델에 누적 |
+| 영속화 | `PaymentRepository.save(payment)` 중심 | repository adapter가 payment와 신규 history를 명시적으로 저장 | mapper adapter가 payment와 신규 history를 명시적으로 저장 |
+| 기존 history vs 신규 | JPA dirty checking/cascade 활용 가능 | adapter에서 신규 history insert 범위를 명시 | adapter에서 신규 history insert 범위를 명시 |
 
 **도메인 메서드 예시** (kotlin):
 ```kotlin
@@ -612,18 +655,20 @@ Cancellation
 - **at-most-once 소비 가정**: outbox는 at-least-once 보장 → consumer 멱등성 필수 (Level 4).
 - **Payment를 Order의 필드로 통합**: aggregate가 너무 커지고 트랜잭션 경계 모호. 별도 aggregate 유지.
 
-## 두 샘플의 변형 허용
+## 세 샘플의 변형 허용
 
-- kotlin: `OrderPaidEvent` = `data class`, MyBatis는 `record`
+- kotlin: `OrderPaidEvent` = `data class`
+- java-jooq/java-mybatis: Java `record` 또는 class
 - kotlin Repository: Spring Data JPA convention
-- MyBatis Repository: port + mapper adapter 그대로
-- 둘 다 `ApplicationEventPublisher` (Spring 표준)는 동일
+- jOOQ Repository: port + jOOQ adapter
+- MyBatis Repository: port + mapper adapter
+- 세 레포 모두 `ApplicationEventPublisher` (Spring 표준)는 동일
 
 ## 외부 의존성
 
-- 양쪽: Jackson (이미 있음)
-- 양쪽: Spring `@Scheduled` (kotlin은 신규 추가 필요)
-- 양쪽: `Idempotency-Key` 헤더 수신은 표준 Spring `@RequestHeader`
+- 세 레포: Jackson (이미 있음)
+- 세 레포: Spring `@Scheduled` + `@EnableScheduling`
+- 세 레포: `Idempotency-Key` 헤더 수신은 표준 Spring `@RequestHeader`
 
 ## 미해결 / 후속 검토
 

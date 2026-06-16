@@ -111,6 +111,8 @@ class InitializeDataLoader(
     private fun Order.applyLifecycle(seed: SeedOrder) = apply {
         when (seed.status) {
             OrderStatus.CREATED -> Unit
+            OrderStatus.PAYMENT_COMPLETION_PENDING ->
+                markPaymentCompletionPending("seed payment completion pending")
             OrderStatus.PAID -> markPaid(seed.paidAt ?: LocalDateTime.now())
             OrderStatus.SHIPPED -> {
                 markPaid(seed.paidAt ?: LocalDateTime.now())

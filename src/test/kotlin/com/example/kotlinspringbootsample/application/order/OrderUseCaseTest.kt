@@ -8,6 +8,8 @@ import com.example.kotlinspringbootsample.application.order.command.FindOrderSta
 import com.example.kotlinspringbootsample.application.order.command.OrderSearchMode
 import com.example.kotlinspringbootsample.application.order.command.PayOrderCommand
 import com.example.kotlinspringbootsample.application.order.command.ShipOrderCommand
+import com.example.kotlinspringbootsample.application.order.result.PayOrderOutcomeStatus
+import com.example.kotlinspringbootsample.application.order.result.PayOrderResult
 import com.example.kotlinspringbootsample.domain.customer.Customer
 import com.example.kotlinspringbootsample.domain.customer.service.CustomerLookupService
 import com.example.kotlinspringbootsample.domain.order.Order
@@ -95,8 +97,9 @@ class OrderUseCaseTest : BehaviorSpec({
 
                 val actual = orderUseCase.payOrder(PayOrderCommand(1L, idempotencyKey))
 
-                actual.status shouldBe OrderStatus.PAID
-                actual.paymentKey shouldBe "MOCK-PG-test-key"
+                actual.status shouldBe PayOrderOutcomeStatus.PAID
+                actual.order.status shouldBe OrderStatus.PAID
+                actual.order.paymentKey shouldBe "MOCK-PG-test-key"
                 verify(exactly = 1) { paymentGateway.approve(amount, idempotencyKey) }
                 verify(exactly = 1) { orderPaymentTransactionService.markPaymentApproved(99L, "MOCK-PG-test-key", approvedAt) }
                 verify(exactly = 1) { orderPaymentTransactionService.completePayOrder(1L, 99L, "MOCK-PG-test-key", approvedAt) }
@@ -105,14 +108,16 @@ class OrderUseCaseTest : BehaviorSpec({
 
         When("같은 idempotencyKey 요청이 replay 대상이면") {
             Then("PG approve를 다시 호출하지 않고 준비 단계의 결과를 반환한다") {
-                val result = paidOrderResult(id = 1L).copy(paymentKey = "MOCK-PG-existing-key")
+                val result = PayOrderResult.paid(
+                    paidOrderResult(id = 1L).copy(paymentKey = "MOCK-PG-existing-key")
+                )
 
                 every { orderPaymentTransactionService.preparePayOrder(PayOrderCommand(1L, idempotencyKey)) } returns
                     PayOrderPreparation.Replay(result)
 
                 val actual = orderUseCase.payOrder(PayOrderCommand(1L, idempotencyKey))
 
-                actual.paymentKey shouldBe "MOCK-PG-existing-key"
+                actual.order.paymentKey shouldBe "MOCK-PG-existing-key"
                 verify(exactly = 0) { paymentGateway.approve(any(), any()) }
                 verify(exactly = 0) { orderPaymentTransactionService.markPaymentApproved(any(), any(), any()) }
                 verify(exactly = 0) { orderPaymentTransactionService.completePayOrder(any(), any(), any(), any()) }
@@ -201,7 +206,7 @@ class OrderUseCaseTest : BehaviorSpec({
         }
 
         When("PG approve와 승인 기록은 성공했지만 주문 완료 트랜잭션이 실패하면") {
-            Then("환불 보상을 호출하고 원래 예외를 전파한다") {
+            Then("pending 상태와 재시도 task 저장을 위임하고 처리 중 응답을 반환한다") {
                 val approvedAt = LocalDateTime.of(2026, 5, 8, 10, 0)
                 val preparation = PayOrderPreparation.ApprovalRequired(
                     orderId = 1L,
@@ -218,28 +223,42 @@ class OrderUseCaseTest : BehaviorSpec({
                 every {
                     orderPaymentTransactionService.completePayOrder(1L, 88L, "MOCK-PG-b2", approvedAt)
                 } throws RuntimeException("simulated outbox failure")
+                val pendingOrder = paidOrderResult(id = 1L, amount = preparation.amount, approvedAt = approvedAt)
+                    .copy(
+                        status = OrderStatus.PAYMENT_COMPLETION_PENDING,
+                        paidAt = null,
+                        paymentKey = "MOCK-PG-b2"
+                    )
                 every {
-                    compensationService.compensateApprovedPayment(
+                    orderPaymentTransactionService.markPaymentCompletionPendingAndSchedule(
+                        orderId = 1L,
                         paymentId = 88L,
                         paymentKey = "MOCK-PG-b2",
                         amount = preparation.amount,
+                        approvedAt = approvedAt,
                         reason = any(),
                         now = any()
                     )
-                } returns CompensationOutcome.Scheduled(taskId = 42L)
+                } returns pendingOrder
 
-                shouldThrow<RuntimeException> {
-                    orderUseCase.payOrder(PayOrderCommand(1L, idempotencyKey))
-                }.message shouldBe "simulated outbox failure"
+                val actual = orderUseCase.payOrder(PayOrderCommand(1L, idempotencyKey))
 
+                actual.status shouldBe PayOrderOutcomeStatus.PROCESSING
+                actual.order.status shouldBe OrderStatus.PAYMENT_COMPLETION_PENDING
+                actual.order.paymentKey shouldBe "MOCK-PG-b2"
                 verify(exactly = 1) {
-                    compensationService.compensateApprovedPayment(
+                    orderPaymentTransactionService.markPaymentCompletionPendingAndSchedule(
+                        orderId = 1L,
                         paymentId = 88L,
                         paymentKey = "MOCK-PG-b2",
                         amount = preparation.amount,
+                        approvedAt = approvedAt,
                         reason = any(),
                         now = any()
                     )
+                }
+                verify(exactly = 0) {
+                    compensationService.compensateApprovedPayment(any(), any(), any(), any(), any())
                 }
             }
         }
