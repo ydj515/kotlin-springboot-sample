@@ -1,11 +1,12 @@
+import org.gradle.api.tasks.testing.Test
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
-    kotlin("jvm") version "1.9.25"
-    kotlin("plugin.spring") version "1.9.25"
-    id("org.springframework.boot") version "3.5.14"
-    id("io.spring.dependency-management") version "1.1.7"
-    kotlin("plugin.jpa") version "1.9.25"
+    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kotlin.spring)
+    alias(libs.plugins.kotlin.jpa)
+    alias(libs.plugins.spring.boot)
+    alias(libs.plugins.dependency.management)
 }
 
 group = "com.example"
@@ -22,43 +23,35 @@ repositories {
 }
 
 dependencies {
-    implementation("org.springframework.boot:spring-boot-starter-data-jpa")
-    implementation("org.springframework.boot:spring-boot-starter-security")
-    implementation("org.springframework.boot:spring-boot-starter-web")
-    implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
-    implementation("org.jetbrains.kotlin:kotlin-reflect")
-    implementation("org.springframework.boot:spring-boot-starter-validation")
+    // Spring Boot
+    implementation(libs.spring.boot.starter.web)
+    implementation(libs.spring.boot.starter.security)
+    implementation(libs.spring.boot.starter.data.jpa)
+    implementation(libs.spring.boot.starter.validation)
 
-    // swagger
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.17")
+    // Kotlin
+    implementation(libs.jackson.module.kotlin)
+    implementation(libs.kotlin.reflect)
 
-    // db
-    runtimeOnly("com.mysql:mysql-connector-j")
-    runtimeOnly("com.h2database:h2")
+    // OpenAPI
+    implementation(libs.springdoc.openapi)
 
-    // jwt
-    implementation("io.jsonwebtoken:jjwt-api:0.11.5")
-    runtimeOnly("io.jsonwebtoken:jjwt-impl:0.11.5")
-    runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.11.5")
+    // DB
+    runtimeOnly(libs.mysql.connector.j)
+    runtimeOnly(libs.h2)
 
-    // test
-    testImplementation("org.springframework.boot:spring-boot-starter-test")
-    testImplementation("org.springframework.boot:spring-boot-testcontainers")
-    testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
+    // JWT
+    implementation(libs.jjwt.api)
+    runtimeOnly(libs.bundles.jjwt.runtime)
 
-    // Kotest 의존성
-    testImplementation("io.kotest:kotest-runner-junit5:5.7.2")
-    testImplementation("io.kotest:kotest-assertions-core:5.7.2")
-    testImplementation("io.kotest.extensions:kotest-extensions-spring:1.1.3")
+    // Test
+    testImplementation(libs.spring.boot.starter.test)
+    testImplementation(libs.kotlin.test.junit5)
+    testImplementation(libs.bundles.kotest)
+    testImplementation(libs.bundles.mockk)
+    testImplementation(libs.bundles.testcontainers.mysql)
 
-    // MockK 의존성
-    testImplementation("io.mockk:mockk:1.13.7")
-    testImplementation("com.ninja-squad:springmockk:4.0.2")
-
-    // Testcontainers
-    testImplementation("org.testcontainers:junit-jupiter")
-    testImplementation("org.testcontainers:mysql")
-
+    testRuntimeOnly(libs.junit.platform.launcher)
 }
 
 kotlin {
@@ -68,33 +61,34 @@ kotlin {
     }
 }
 
-allOpen {
-    annotation("jakarta.persistence.Entity")
-    annotation("jakarta.persistence.MappedSuperclass")
-    annotation("jakarta.persistence.Embeddable")
-}
-
-tasks.withType<Test> {
+tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+    jvmArgs("-Xshare:off")
 }
 
-// 단위 테스트: 통합 테스트 클래스(*IntegrationTest)는 제외.
-// Testcontainers + MySQL 부팅 비용 없이 빠른 피드백 유지.
 tasks.named<Test>("test") {
+    description = "단위 테스트를 실행합니다."
+
+    // 클래스명이 *IntegrationTest 인 테스트는 기본 test에서 제외합니다.
     exclude("**/*IntegrationTest*")
 }
 
-// MySQL Testcontainers 기반 통합 테스트만 따로 실행한다.
-// 클래스명이 *IntegrationTest로 끝나면 자동 포함.
-val integrationTest = tasks.register<Test>("integrationTest") {
+val integrationTest by tasks.registering(Test::class) {
     description = "MySQL Testcontainers 기반 통합 테스트를 실행합니다."
     group = "verification"
+
     testClassesDirs = sourceSets["test"].output.classesDirs
     classpath = sourceSets["test"].runtimeClasspath
+
     shouldRunAfter(tasks.named("test"))
+
     useJUnitPlatform()
+
+    // 클래스명이 *IntegrationTest 인 테스트만 실행합니다.
     include("**/*IntegrationTest*")
 }
 
-// check 단계에 integrationTest를 포함하지 않는다.
-// CI에서는 별도 job으로 명시 실행해 Docker가 필요한 환경에서만 동작하도록 한다.
+// 통합 테스트는 Docker 의존성이 있으므로 기본 check에는 연결하지 않습니다.
+// 필요할 때 명시적으로 실행:
+//
+// ./gradlew integrationTest
